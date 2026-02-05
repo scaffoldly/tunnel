@@ -499,6 +499,13 @@ func tunnelFlags(shouldHide bool) []cli.Flag {
 			Value:  time.Second * 30,
 			Hidden: true,
 		},
+		&cli.StringFlag{
+			Name:   cfdflags.EdgeIpVersion,
+			Value:  "auto",
+			Hidden: true,
+		},
+		selectProtocolFlag,
+		postQuantumFlag,
 	}...)
 	return flags
 }
