@@ -21,15 +21,11 @@ import (
 	"github.com/urfave/cli/v2"
 	"github.com/urfave/cli/v2/altsrc"
 
-	"github.com/cloudflare/cloudflared/cfapi"
 	"github.com/cloudflare/cloudflared/cmd/cloudflared/cliutil"
 	cfdflags "github.com/cloudflare/cloudflared/cmd/cloudflared/flags"
-	"github.com/cloudflare/cloudflared/cmd/cloudflared/proxydns"
-	"github.com/cloudflare/cloudflared/cmd/cloudflared/updater"
 	"github.com/cloudflare/cloudflared/config"
 	"github.com/cloudflare/cloudflared/connection"
 	"github.com/cloudflare/cloudflared/credentials"
-	"github.com/cloudflare/cloudflared/diagnostic"
 	"github.com/cloudflare/cloudflared/edgediscovery"
 	"github.com/cloudflare/cloudflared/ingress"
 	"github.com/cloudflare/cloudflared/logger"
@@ -41,7 +37,6 @@ import (
 	"github.com/cloudflare/cloudflared/tlsconfig"
 	"github.com/cloudflare/cloudflared/tunneldns"
 	"github.com/cloudflare/cloudflared/tunnelstate"
-	"github.com/cloudflare/cloudflared/validation"
 )
 
 const (
@@ -167,30 +162,8 @@ func Flags() []cli.Flag {
 }
 
 func Commands() []*cli.Command {
-	subcommands := []*cli.Command{
-		buildLoginSubcommand(false),
-		buildCreateCommand(),
-		buildRouteCommand(),
-		buildVirtualNetworkSubcommand(false),
-		buildRunCommand(),
-		buildListCommand(),
-		buildReadyCommand(),
-		buildInfoCommand(),
-		buildIngressSubcommand(),
-		buildDeleteCommand(),
-		buildCleanupCommand(),
-		buildTokenCommand(),
-		buildDiagCommand(),
-		// for compatibility, allow following as tunnel subcommands
-		proxydns.Command(true),
-		cliutil.RemovedCommand("db-connect"),
-	}
-
 	return []*cli.Command{
-		buildTunnelCommand(subcommands),
-		// for compatibility, allow following as top-level subcommands
-		buildLoginSubcommand(true),
-		cliutil.RemovedCommand("db-connect"),
+		buildTunnelCommand(nil),
 	}
 }
 
@@ -238,50 +211,11 @@ func TunnelCommand(c *cli.Context) error {
 		return err
 	}
 
-	// Run a adhoc named tunnel
-	// Allows for the creation, routing (optional), and startup of a tunnel in one command
-	// --name required
-	// --url or --hello-world required
-	// --hostname optional
-	if name := c.String(cfdflags.Name); name != "" {
-		hostname, err := validation.ValidateHostname(c.String("hostname"))
-		if err != nil {
-			return errors.Wrap(err, "Invalid hostname provided")
-		}
-		url := c.String("url")
-		if url == hostname && url != "" && hostname != "" {
-			return fmt.Errorf("hostname and url shouldn't match. See --help for more information")
-		}
-
-		return runAdhocNamedTunnel(sc, name, c.String(CredFileFlag))
-	}
-
 	// Run a quick tunnel
 	// A unauthenticated named tunnel hosted on <random>.<quick-tunnels-service>.com
-	// We don't support running proxy-dns and a quick tunnel at the same time as the same process
 	shouldRunQuickTunnel := c.IsSet("url") || c.IsSet(ingress.HelloWorldFlag)
-	if !c.IsSet(cfdflags.ProxyDns) && c.String("quick-service") != "" && shouldRunQuickTunnel {
+	if c.String("quick-service") != "" && shouldRunQuickTunnel {
 		return RunQuickTunnel(sc)
-	}
-
-	// If user provides a config, check to see if they meant to use `tunnel run` instead
-	if ref := config.GetConfiguration().TunnelID; ref != "" {
-		return fmt.Errorf("Use `cloudflared tunnel run` to start tunnel %s", ref)
-	}
-
-	// Classic tunnel usage is no longer supported
-	if c.String("hostname") != "" {
-		return errDeprecatedClassicTunnel
-	}
-
-	if c.IsSet(cfdflags.ProxyDns) {
-		if shouldRunQuickTunnel {
-			return fmt.Errorf("running a quick tunnel with `proxy-dns` is not supported")
-		}
-		// NamedTunnelProperties are nil since proxy dns server does not need it.
-		// This is supported for legacy reasons: dns proxy server is not a tunnel and ideally should
-		// not run as part of cloudflared tunnel.
-		return StartServer(sc.c, buildInfo, nil, sc.log)
 	}
 
 	return errors.New(tunnelCmdErrorMessage)
@@ -289,44 +223,6 @@ func TunnelCommand(c *cli.Context) error {
 
 func Init(info *cliutil.BuildInfo, gracefulShutdown chan struct{}) {
 	buildInfo, graceShutdownC = info, gracefulShutdown
-}
-
-// runAdhocNamedTunnel create, route and run a named tunnel in one command
-func runAdhocNamedTunnel(sc *subcommandContext, name, credentialsOutputPath string) error {
-	tunnel, ok, err := sc.tunnelActive(name)
-	if err != nil || !ok {
-		// pass empty string as secret to generate one
-		tunnel, err = sc.create(name, credentialsOutputPath, "")
-		if err != nil {
-			return errors.Wrap(err, "failed to create tunnel")
-		}
-	} else {
-		sc.log.Info().Str(LogFieldTunnelID, tunnel.ID.String()).Msg("Reusing existing tunnel with this name")
-	}
-
-	if r, ok := routeFromFlag(sc.c); ok {
-		if res, err := sc.route(tunnel.ID, r); err != nil {
-			sc.log.Err(err).Str("route", r.String()).Msg(routeFailMsg)
-		} else {
-			sc.log.Info().Msg(res.SuccessSummary())
-		}
-	}
-
-	if err := sc.run(tunnel.ID); err != nil {
-		return errors.Wrap(err, "error running tunnel")
-	}
-
-	return nil
-}
-
-func routeFromFlag(c *cli.Context) (route cfapi.HostnameRoute, ok bool) {
-	if hostname := c.String("hostname"); hostname != "" {
-		if lbPool := c.String(cfdflags.LBPool); lbPool != "" {
-			return cfapi.NewLBRoute(hostname, lbPool), true
-		}
-		return cfapi.NewDNSRoute(hostname, c.Bool(overwriteDNSFlagName)), true
-	}
-	return nil, false
 }
 
 func StartServer(
@@ -410,16 +306,6 @@ func StartServer(
 		go writePidFile(connectedSignal, c.String("pidfile"), log)
 	}
 
-	// update needs to be after DNS proxy is up to resolve equinox server address
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		autoupdater := updater.NewAutoUpdater(
-			c.Bool(cfdflags.NoAutoUpdate), c.Duration(cfdflags.AutoUpdateFreq), &listeners, log,
-		)
-		errC <- autoupdater.Run(ctx)
-	}()
-
 	// Serve DNS proxy stand-alone if no tunnel type (quick, adhoc, named) is going to run
 	if dnsProxyStandAlone(c, namedTunnel) {
 		connectedSignal.Notify()
@@ -497,28 +383,9 @@ func StartServer(
 		tracker := tunnelstate.NewConnTracker(log)
 		observer.RegisterSink(tracker)
 
-		ipv4, ipv6, err := determineICMPSources(c, log)
-		sources := make([]string, 0)
-		if err == nil {
-			sources = append(sources, ipv4.String())
-			sources = append(sources, ipv6.String())
-		}
-
 		readinessServer := metrics.NewReadyServer(connectorID, tracker)
-		cliFlags := nonSecretCliFlags(log, c, nonSecretFlagsList)
-		diagnosticHandler := diagnostic.NewDiagnosticHandler(
-			log,
-			0,
-			diagnostic.NewSystemCollectorImpl(buildInfo.CloudflaredVersion),
-			tunnelConfig.NamedTunnel.Credentials.TunnelID,
-			connectorID,
-			tracker,
-			cliFlags,
-			sources,
-		)
 		metricsConfig := metrics.Config{
 			ReadyServer:         readinessServer,
-			DiagnosticHandler:   diagnosticHandler,
 			QuickTunnelHostname: quickTunnelURL,
 			Orchestrator:        orchestrator,
 		}
@@ -904,9 +771,9 @@ func configureCloudflaredFlags(shouldHide bool) []cli.Flag {
 		}),
 		altsrc.NewDurationFlag(&cli.DurationFlag{
 			Name:   cfdflags.AutoUpdateFreq,
-			Usage:  fmt.Sprintf("Autoupdate frequency. Default is %v.", updater.DefaultCheckUpdateFreq),
-			Value:  updater.DefaultCheckUpdateFreq,
-			Hidden: shouldHide,
+			Usage:  "Autoupdate frequency (disabled)",
+			Value:  time.Hour * 24,
+			Hidden: true,
 		}),
 		altsrc.NewBoolFlag(&cli.BoolFlag{
 			Name:    cfdflags.NoAutoUpdate,

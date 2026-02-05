@@ -15,8 +15,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 	"golang.org/x/net/trace"
-
-	"github.com/cloudflare/cloudflared/diagnostic"
 )
 
 const (
@@ -54,7 +52,6 @@ func GetMetricsKnownAddresses(runtimeType string) []string {
 
 type Config struct {
 	ReadyServer         *ReadyServer
-	DiagnosticHandler   *diagnostic.Handler
 	QuickTunnelHostname string
 	Orchestrator        orchestrator
 
@@ -93,8 +90,6 @@ func newMetricsHandler(
 			_, _ = w.Write(json)
 		})
 	}
-
-	config.DiagnosticHandler.InstallEndpoints(router)
 
 	return router
 }

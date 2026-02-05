@@ -34,9 +34,6 @@ func NewConfig(version string, arch string, featureSelector features.FeatureSele
 }
 
 // ConnectionOptionsSnapshot is a snapshot of the current client information used to initialize a connection.
-//
-// The FeatureSnapshot is the features that are available for this connection. At the client level they may
-// change, but they will not change within the scope of this struct.
 type ConnectionOptionsSnapshot struct {
 	client              pogs.ClientInfo
 	originLocalIP       net.IP

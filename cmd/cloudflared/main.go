@@ -10,20 +10,9 @@ import (
 	"github.com/urfave/cli/v2"
 	"go.uber.org/automaxprocs/maxprocs"
 
-	"github.com/cloudflare/cloudflared/cmd/cloudflared/access"
 	"github.com/cloudflare/cloudflared/cmd/cloudflared/cliutil"
-	cfdflags "github.com/cloudflare/cloudflared/cmd/cloudflared/flags"
-	"github.com/cloudflare/cloudflared/cmd/cloudflared/proxydns"
-	"github.com/cloudflare/cloudflared/cmd/cloudflared/tail"
 	"github.com/cloudflare/cloudflared/cmd/cloudflared/tunnel"
-	"github.com/cloudflare/cloudflared/cmd/cloudflared/updater"
-	"github.com/cloudflare/cloudflared/config"
-	"github.com/cloudflare/cloudflared/logger"
 	"github.com/cloudflare/cloudflared/metrics"
-	"github.com/cloudflare/cloudflared/overwatch"
-	"github.com/cloudflare/cloudflared/token"
-	"github.com/cloudflare/cloudflared/tracing"
-	"github.com/cloudflare/cloudflared/watcher"
 )
 
 const (
@@ -86,47 +75,11 @@ func main() {
 	app.Commands = commands(cli.ShowVersion)
 
 	tunnel.Init(bInfo, graceShutdownC) // we need this to support the tunnel sub command...
-	access.Init(graceShutdownC, Version)
-	updater.Init(bInfo)
-	tracing.Init(Version)
-	token.Init(Version)
-	tail.Init(bInfo)
 	runApp(app, graceShutdownC)
 }
 
 func commands(version func(c *cli.Context)) []*cli.Command {
 	cmds := []*cli.Command{
-		{
-			Name:   "update",
-			Action: cliutil.ConfiguredAction(updater.Update),
-			Usage:  "Update the agent if a new version exists",
-			Flags: []cli.Flag{
-				&cli.BoolFlag{
-					Name:  "beta",
-					Usage: "specify if you wish to update to the latest beta version",
-				},
-				&cli.BoolFlag{
-					Name:   cfdflags.Force,
-					Usage:  "specify if you wish to force an upgrade to the latest version regardless of the current version",
-					Hidden: true,
-				},
-				&cli.BoolFlag{
-					Name:   "staging",
-					Usage:  "specify if you wish to use the staging url for updating",
-					Hidden: true,
-				},
-				&cli.StringFlag{
-					Name:   "version",
-					Usage:  "specify a version you wish to upgrade or downgrade to",
-					Hidden: false,
-				},
-			},
-			Description: `Looks for a new version on the official download server.
-If a new version exists, updates the agent binary and quits.
-Otherwise, does nothing.
-
-To determine if an update happened in a script, check for error code 11.`,
-		},
 		{
 			Name: "version",
 			Action: func(c *cli.Context) (err error) {
@@ -149,15 +102,11 @@ To determine if an update happened in a script, check for error code 11.`,
 		},
 	}
 	cmds = append(cmds, tunnel.Commands()...)
-	cmds = append(cmds, proxydns.Command(false))
-	cmds = append(cmds, access.Commands()...)
-	cmds = append(cmds, tail.Command())
 	return cmds
 }
 
 func flags() []cli.Flag {
-	flags := tunnel.Flags()
-	return append(flags, access.Flags()...)
+	return tunnel.Flags()
 }
 
 func isEmptyInvocation(c *cli.Context) bool {
@@ -193,34 +142,5 @@ func captureError(err error) {
 
 // cloudflared was started without any flags
 func handleServiceMode(c *cli.Context, shutdownC chan struct{}) error {
-	log := logger.CreateLoggerFromContext(c, logger.DisableTerminalLog)
-
-	// start the main run loop that reads from the config file
-	f, err := watcher.NewFile()
-	if err != nil {
-		log.Err(err).Msg("Cannot load config file")
-		return err
-	}
-
-	configPath := config.FindOrCreateConfigPath()
-	configManager, err := config.NewFileManager(f, configPath, log)
-	if err != nil {
-		log.Err(err).Msg("Cannot setup config file for monitoring")
-		return err
-	}
-	log.Info().Msgf("monitoring config file at: %s", configPath)
-
-	serviceCallback := func(t string, name string, err error) {
-		if err != nil {
-			log.Err(err).Msgf("%s service: %s encountered an error", t, name)
-		}
-	}
-	serviceManager := overwatch.NewAppManager(serviceCallback)
-
-	appService := NewAppService(configManager, serviceManager, shutdownC, log)
-	if err := appService.Run(); err != nil {
-		log.Err(err).Msg("Failed to start app service")
-		return err
-	}
-	return nil
+	return fmt.Errorf("no command specified - use 'cloudflared tunnel --url <URL>' for quick tunnels")
 }

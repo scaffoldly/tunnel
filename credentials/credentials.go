@@ -3,8 +3,6 @@ package credentials
 import (
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
-
-	"github.com/cloudflare/cloudflared/cfapi"
 )
 
 const (
@@ -41,25 +39,6 @@ func (c User) CertPath() string {
 
 func (c User) IsFEDEndpoint() bool {
 	return c.cert.Endpoint == FedEndpoint
-}
-
-// Client uses the user credentials to create a Cloudflare API client
-func (c *User) Client(apiURL string, userAgent string, log *zerolog.Logger) (cfapi.Client, error) {
-	if apiURL == "" {
-		return nil, errors.New("An api-url was not provided for the Cloudflare API client")
-	}
-	client, err := cfapi.NewRESTClient(
-		apiURL,
-		c.cert.AccountID,
-		c.cert.ZoneID,
-		c.cert.APIToken,
-		userAgent,
-		log,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return client, nil
 }
 
 // Read will load and read the origin cert.pem to load the user credentials
