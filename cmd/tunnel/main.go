@@ -94,7 +94,7 @@ func action(graceShutdownC chan struct{}) cli.ActionFunc {
 		if isEmptyInvocation(c) {
 			return handleServiceMode(c, graceShutdownC)
 		}
-		return cloudflare.CloudflareCommand(c)
+		return cloudflare.Command(c)
 	})
 }
 

@@ -40,14 +40,14 @@ func Flags() []cli.Flag {
 
 func Commands() []*cli.Command {
 	return []*cli.Command{
-		buildCloudflareCommand(nil),
+		buildCommand(nil),
 	}
 }
 
-func buildCloudflareCommand(subcommands []*cli.Command) *cli.Command {
+func buildCommand(subcommands []*cli.Command) *cli.Command {
 	return &cli.Command{
 		Name:      "cloudflare",
-		Action:    cliutil.ConfiguredAction(CloudflareCommand),
+		Action:    cliutil.ConfiguredAction(Command),
 		Category:  "Tunnel",
 		Usage:     "Create a quick Cloudflare tunnel to expose a local service",
 		ArgsUsage: " ",
@@ -63,7 +63,7 @@ The tunnel URL is printed to stdout (logs go to stderr), enabling:
 	}
 }
 
-func CloudflareCommand(c *cli.Context) error {
+func Command(c *cli.Context) error {
 	sc, err := newSubcommandContext(c)
 	if err != nil {
 		return err
