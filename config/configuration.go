@@ -6,12 +6,10 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"time"
 
-	homedir "github.com/mitchellh/go-homedir"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/urfave/cli/v2"
@@ -43,38 +41,6 @@ const (
 	BastionFlag = "bastion"
 )
 
-// DefaultConfigDirectory returns the default directory of the config file
-func DefaultConfigDirectory() string {
-	if runtime.GOOS == "windows" {
-		path := os.Getenv("CFDPATH")
-		if path == "" {
-			path = filepath.Join(os.Getenv("ProgramFiles(x86)"), "cloudflared")
-			if _, err := os.Stat(path); os.IsNotExist(err) { // doesn't exist, so return an empty failure string
-				return ""
-			}
-		}
-		return path
-	}
-	return DefaultUnixConfigLocation
-}
-
-// DefaultLogDirectory returns the default directory for log files
-func DefaultLogDirectory() string {
-	if runtime.GOOS == "windows" {
-		return DefaultConfigDirectory()
-	}
-	return DefaultUnixLogLocation
-}
-
-// DefaultConfigPath returns the default location of a config file
-func DefaultConfigPath() string {
-	dir := DefaultConfigDirectory()
-	if dir == "" {
-		return DefaultConfigFiles[0]
-	}
-	return filepath.Join(dir, DefaultConfigFiles[0])
-}
-
 // DefaultConfigSearchDirectories returns the default folder locations of the config
 func DefaultConfigSearchDirectories() []string {
 	dirs := make([]string, len(defaultUserConfigDirs))
@@ -83,72 +49,6 @@ func DefaultConfigSearchDirectories() []string {
 		dirs = append(dirs, defaultNixConfigDirs...)
 	}
 	return dirs
-}
-
-// FileExists checks to see if a file exist at the provided path.
-func FileExists(path string) (bool, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// ignore missing files
-			return false, nil
-		}
-		return false, err
-	}
-	_ = f.Close()
-	return true, nil
-}
-
-// FindDefaultConfigPath returns the first path that contains a config file.
-// If none of the combination of DefaultConfigSearchDirectories() and DefaultConfigFiles
-// contains a config file, return empty string.
-func FindDefaultConfigPath() string {
-	for _, configDir := range DefaultConfigSearchDirectories() {
-		for _, configFile := range DefaultConfigFiles {
-			dirPath, err := homedir.Expand(configDir)
-			if err != nil {
-				continue
-			}
-			path := filepath.Join(dirPath, configFile)
-			if ok, _ := FileExists(path); ok {
-				return path
-			}
-		}
-	}
-	return ""
-}
-
-// FindOrCreateConfigPath returns the first path that contains a config file
-// or creates one in the primary default path if it doesn't exist
-func FindOrCreateConfigPath() string {
-	path := FindDefaultConfigPath()
-
-	if path == "" {
-		// create the default directory if it doesn't exist
-		path = DefaultConfigPath()
-		if err := os.MkdirAll(filepath.Dir(path), os.ModePerm); err != nil {
-			return ""
-		}
-
-		// write a new config file out
-		file, err := os.Create(path)
-		if err != nil {
-			return ""
-		}
-		defer file.Close()
-
-		logDir := DefaultLogDirectory()
-		_ = os.MkdirAll(logDir, os.ModePerm) // try and create it. Doesn't matter if it succeed or not, only byproduct will be no logs
-
-		c := Root{
-			LogDirectory: logDir,
-		}
-		if err := yaml.NewEncoder(file).Encode(&c); err != nil {
-			return ""
-		}
-	}
-
-	return path
 }
 
 // ValidateUnixSocket ensures --unix-socket param is used exclusively

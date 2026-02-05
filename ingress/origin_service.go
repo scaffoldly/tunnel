@@ -93,27 +93,6 @@ func (o httpService) MarshalJSON() ([]byte, error) {
 	return json.Marshal(o.String())
 }
 
-// rawTCPService dials TCP to the destination specified by the client
-// It's used by warp routing
-type rawTCPService struct {
-	name         string
-	dialer       net.Dialer
-	writeTimeout time.Duration
-	logger       *zerolog.Logger
-}
-
-func (o *rawTCPService) String() string {
-	return o.name
-}
-
-func (o *rawTCPService) start(_ *zerolog.Logger, _ <-chan struct{}, _ OriginRequestConfig) error {
-	return nil
-}
-
-func (o rawTCPService) MarshalJSON() ([]byte, error) {
-	return json.Marshal(o.String())
-}
-
 // tcpOverWSService models TCP origins serving eyeballs connecting over websocket, such as
 // cloudflared access commands.
 type tcpOverWSService struct {
@@ -283,25 +262,6 @@ func (o statusCode) MarshalJSON() ([]byte, error) {
 	return json.Marshal(o.String())
 }
 
-// WarpRoutingService starts a tcp stream between the origin and requests from
-// warp clients.
-type WarpRoutingService struct {
-	Proxy StreamBasedOriginProxy
-}
-
-func NewWarpRoutingService(config WarpRoutingConfig, writeTimeout time.Duration) *WarpRoutingService {
-	svc := &rawTCPService{
-		name: ServiceWarpRouting,
-		dialer: net.Dialer{
-			Timeout:   config.ConnectTimeout.Duration,
-			KeepAlive: config.TCPKeepAlive.Duration,
-		},
-		writeTimeout: writeTimeout,
-	}
-
-	return &WarpRoutingService{Proxy: svc}
-}
-
 // ManagementService starts a local HTTP server to handle incoming management requests.
 type ManagementService struct {
 	HTTPLocalProxy
@@ -389,23 +349,3 @@ func newHTTPTransport(service OriginService, cfg OriginRequestConfig, log *zerol
 	return &httpTransport, nil
 }
 
-// MockOriginHTTPService should only be used by other packages to mock OriginService. Set Transport to configure desired RoundTripper behavior.
-type MockOriginHTTPService struct {
-	Transport http.RoundTripper
-}
-
-func (mos MockOriginHTTPService) RoundTrip(req *http.Request) (*http.Response, error) {
-	return mos.Transport.RoundTrip(req)
-}
-
-func (mos MockOriginHTTPService) String() string {
-	return "MockOriginService"
-}
-
-func (mos MockOriginHTTPService) start(log *zerolog.Logger, _ <-chan struct{}, cfg OriginRequestConfig) error {
-	return nil
-}
-
-func (mos MockOriginHTTPService) MarshalJSON() ([]byte, error) {
-	return json.Marshal(mos.String())
-}

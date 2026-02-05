@@ -85,20 +85,6 @@ func (o *statusCode) RoundTrip(_ *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-func (o *rawTCPService) EstablishConnection(ctx context.Context, dest string, logger *zerolog.Logger) (OriginConnection, error) {
-	conn, err := o.dialer.DialContext(ctx, "tcp", dest)
-	if err != nil {
-		return nil, err
-	}
-
-	originConn := &tcpConnection{
-		Conn:         conn,
-		writeTimeout: o.writeTimeout,
-		logger:       logger,
-	}
-	return originConn, nil
-}
-
 func (o *tcpOverWSService) EstablishConnection(ctx context.Context, dest string, _ *zerolog.Logger) (OriginConnection, error) {
 	var err error
 	if !o.isBastion {
