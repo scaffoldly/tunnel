@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/urfave/cli/v2"
 	"go.uber.org/automaxprocs/maxprocs"
@@ -41,21 +40,12 @@ func main() {
 
 	app := &cli.App{}
 	app.Name = "cloudflared"
-	app.Usage = "Cloudflare's command-line tool and agent"
-	app.UsageText = "cloudflared [global options] [command] [command options]"
-	app.Copyright = fmt.Sprintf(
-		`(c) %d Cloudflare Inc.
-   Your installation of cloudflared software constitutes a symbol of your signature indicating that you accept
-   the terms of the Apache License Version 2.0 (https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/license),
-   Terms (https://www.cloudflare.com/terms/) and Privacy Policy (https://www.cloudflare.com/privacypolicy/).`,
-		time.Now().Year(),
-	)
+	app.Usage = "Create quick tunnels to expose local services"
+	app.UsageText = "cloudflared tunnel --url <URL>"
 	app.Version = fmt.Sprintf("%s (built %s%s)", Version, BuildTime, bInfo.GetBuildTypeMsg())
-	app.Description = `cloudflared connects your machine or user identity to Cloudflare's global network.
-	You can use it to authenticate a session to reach an API behind Access, route web traffic to this machine,
-	and configure access control.
+	app.Description = `Expose a local HTTP service to the internet via Cloudflare's network.
 
-	See https://developers.cloudflare.com/cloudflare-one/connections/connect-apps for more in-depth documentation.`
+Example: cloudflared tunnel --url http://localhost:8080`
 	app.Flags = flags()
 	app.Action = action(graceShutdownC)
 	app.Commands = commands(cli.ShowVersion)

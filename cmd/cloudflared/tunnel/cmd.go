@@ -26,14 +26,7 @@ import (
 )
 
 const (
-	tunnelCmdErrorMessage = `You did not specify any valid additional argument to the cloudflared tunnel command.
-
-If you are trying to run a Quick Tunnel then you need to explicitly pass the --url flag.
-Eg. cloudflared tunnel --url localhost:8080/.
-
-Please note that Quick Tunnels are meant to be ephemeral and should only be used for testing purposes.
-For production usage, we recommend creating Named Tunnels. (https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/)
-`
+	tunnelCmdErrorMessage = `Missing --url flag. Usage: cloudflared tunnel --url http://localhost:8080`
 )
 
 var (
@@ -56,34 +49,15 @@ func buildTunnelCommand(subcommands []*cli.Command) *cli.Command {
 		Name:      "tunnel",
 		Action:    cliutil.ConfiguredAction(TunnelCommand),
 		Category:  "Tunnel",
-		Usage:     "Use Cloudflare Tunnel to expose private services to the Internet or to Cloudflare connected private users.",
+		Usage:     "Create a quick tunnel to expose a local service",
 		ArgsUsage: " ",
-		Description: `    Cloudflare Tunnel allows to expose private services without opening any ingress port on this machine. It can expose:
-  A) Locally reachable HTTP-based private services to the Internet on DNS with Cloudflare as authority (which you can
-then protect with Cloudflare Access).
-  B) Locally reachable TCP/UDP-based private services to Cloudflare connected private users in the same account, e.g.,
-those enrolled to a Zero Trust WARP Client.
+		Description: `Creates an ephemeral tunnel to expose a local HTTP service to the internet.
 
-You can manage your Tunnels via one.dash.cloudflare.com. This approach will only require you to run a single command
-later in each machine where you wish to run a Tunnel.
+Example:
+    $ cloudflared tunnel --url http://localhost:8080
 
-Alternatively, you can manage your Tunnels via the command line. Begin by obtaining a certificate to be able to do so:
-
-	$ cloudflared tunnel login
-
-With your certificate installed you can then get started with Tunnels:
-
-	$ cloudflared tunnel create my-first-tunnel
-	$ cloudflared tunnel route dns my-first-tunnel my-first-tunnel.mydomain.com
-	$ cloudflared tunnel run --hello-world my-first-tunnel
-
-You can now access my-first-tunnel.mydomain.com and be served an example page by your local cloudflared process.
-
-For exposing local TCP/UDP services by IP to your privately connected users, check out:
-
-	$ cloudflared tunnel route ip --help
-
-See https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/ for more info.`,
+The tunnel URL is printed to stdout (logs go to stderr), enabling:
+    $ cloudflared tunnel --url http://localhost:8080 > ~/tunnel-url`,
 		Subcommands: subcommands,
 		Flags:       tunnelFlags(false),
 	}
