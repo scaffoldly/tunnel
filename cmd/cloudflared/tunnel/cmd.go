@@ -35,7 +35,6 @@ import (
 	"github.com/cloudflare/cloudflared/signal"
 	"github.com/cloudflare/cloudflared/supervisor"
 	"github.com/cloudflare/cloudflared/tlsconfig"
-	"github.com/cloudflare/cloudflared/tunneldns"
 	"github.com/cloudflare/cloudflared/tunnelstate"
 )
 
@@ -289,28 +288,10 @@ func StartServer(
 
 	go waitForSignal(graceShutdownC, log)
 
-	if c.IsSet(cfdflags.ProxyDns) {
-		dnsReadySignal := make(chan struct{})
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errC <- runDNSProxyServer(c, dnsReadySignal, ctx.Done(), log)
-		}()
-		// Wait for proxy-dns to come up (if used)
-		<-dnsReadySignal
-	}
-
 	connectedSignal := signal.New(make(chan struct{}))
 	go notifySystemd(connectedSignal)
 	if c.IsSet("pidfile") {
 		go writePidFile(connectedSignal, c.String("pidfile"), log)
-	}
-
-	// Serve DNS proxy stand-alone if no tunnel type (quick, adhoc, named) is going to run
-	if dnsProxyStandAlone(c, namedTunnel) {
-		connectedSignal.Notify()
-		// no grace period, handle SIGINT/SIGTERM immediately
-		return waitToShutdown(&wg, cancel, errC, graceShutdownC, 0, log)
 	}
 
 	if namedTunnel == nil {
@@ -1071,7 +1052,7 @@ func configureProxyDNSFlags(shouldHide bool) []cli.Flag {
 		altsrc.NewIntFlag(&cli.IntFlag{
 			Name:    "proxy-dns-max-upstream-conns",
 			Usage:   "Maximum concurrent connections to upstream. Setting to 0 means unlimited.",
-			Value:   tunneldns.MaxUpstreamConnsDefault,
+			Value:   5,
 			Hidden:  shouldHide,
 			EnvVars: []string{"TUNNEL_DNS_MAX_UPSTREAM_CONNS"},
 		}),
