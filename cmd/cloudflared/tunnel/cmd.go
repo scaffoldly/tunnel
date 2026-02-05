@@ -205,7 +205,7 @@ func TunnelCommand(c *cli.Context) error {
 
 	// Run a quick tunnel
 	// A unauthenticated named tunnel hosted on <random>.<quick-tunnels-service>.com
-	shouldRunQuickTunnel := c.IsSet("url") || c.IsSet(ingress.HelloWorldFlag)
+	shouldRunQuickTunnel := c.IsSet("url") || c.String("url") != "" || c.IsSet(ingress.HelloWorldFlag)
 	if c.String("quick-service") != "" && shouldRunQuickTunnel {
 		return RunQuickTunnel(sc)
 	}
@@ -504,6 +504,31 @@ func tunnelFlags(shouldHide bool) []cli.Flag {
 			Value:  "auto",
 			Hidden: true,
 		},
+		&cli.DurationFlag{
+			Name:   cfdflags.RpcTimeout,
+			Value:  5 * time.Second,
+			Hidden: true,
+		},
+		&cli.DurationFlag{
+			Name:   "dial-edge-timeout",
+			Value:  15 * time.Second,
+			Hidden: true,
+		},
+		&cli.IntFlag{
+			Name:   cfdflags.Retries,
+			Value:  5,
+			Hidden: true,
+		},
+		&cli.IntFlag{
+			Name:   cfdflags.MaxEdgeAddrRetries,
+			Value:  8,
+			Hidden: true,
+		},
+		&cli.StringFlag{
+			Name:   cfdflags.ManagementHostname,
+			Value:  "management.argotunnel.com",
+			Hidden: true,
+		},
 		selectProtocolFlag,
 		postQuantumFlag,
 	}...)
@@ -524,17 +549,18 @@ func configureCloudflaredFlags(shouldHide bool) []cli.Flag {
 
 func configureProxyFlags(shouldHide bool) []cli.Flag {
 	return []cli.Flag{
-		&cli.StringFlag{
-			Name:   "url",
-			Value:  "http://localhost:8080",
-			Usage:  "Connect to the local webserver at URL.",
-			Hidden: shouldHide,
-		},
-		&cli.BoolFlag{
-			Name:   ingress.NoTLSVerifyFlag,
-			Usage:  "Disables TLS verification of the certificate presented by your origin.",
-			Hidden: shouldHide,
-		},
+		altsrc.NewStringFlag(&cli.StringFlag{
+			Name:    "url",
+			Usage:   "Connect to the local webserver at URL.",
+			EnvVars: []string{"TUNNEL_URL"},
+			Hidden:  shouldHide,
+		}),
+		altsrc.NewBoolFlag(&cli.BoolFlag{
+			Name:    ingress.NoTLSVerifyFlag,
+			Usage:   "Disables TLS verification of the certificate presented by your origin.",
+			EnvVars: []string{"NO_TLS_VERIFY"},
+			Hidden:  shouldHide,
+		}),
 	}
 }
 

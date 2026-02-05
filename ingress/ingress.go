@@ -167,7 +167,7 @@ func parseSingleOriginService(c *cli.Context, allowURLFromArgs bool) (OriginServ
 	if c.IsSet(config.BastionFlag) {
 		return newBastionService(), nil
 	}
-	if c.IsSet("url") {
+	if c.IsSet("url") || c.String("url") != "" {
 		originURL, err := config.ValidateUrl(c, allowURLFromArgs)
 		if err != nil {
 			return nil, errors.Wrap(err, "Error validating origin URL")
