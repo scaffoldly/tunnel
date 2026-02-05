@@ -7,14 +7,12 @@ import (
 	"time"
 
 	"github.com/coreos/go-systemd/v22/daemon"
-	"github.com/facebookgo/grace/gracenet"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/urfave/cli/v2"
 	"github.com/urfave/cli/v2/altsrc"
 
 	"github.com/cloudflare/cloudflared/cmd/cloudflared/cliutil"
-	cfdflags "github.com/cloudflare/cloudflared/cmd/cloudflared/flags"
 	"github.com/cloudflare/cloudflared/config"
 	"github.com/cloudflare/cloudflared/connection"
 	"github.com/cloudflare/cloudflared/credentials"
@@ -22,11 +20,9 @@ import (
 	"github.com/cloudflare/cloudflared/ingress"
 	"github.com/cloudflare/cloudflared/logger"
 	"github.com/cloudflare/cloudflared/management"
-	"github.com/cloudflare/cloudflared/metrics"
 	"github.com/cloudflare/cloudflared/orchestration"
 	"github.com/cloudflare/cloudflared/signal"
 	"github.com/cloudflare/cloudflared/supervisor"
-	"github.com/cloudflare/cloudflared/tunnelstate"
 )
 
 const (
@@ -120,7 +116,6 @@ func StartServer(
 	log *zerolog.Logger,
 ) error {
 	var wg sync.WaitGroup
-	listeners := gracenet.Net{}
 	errC := make(chan error)
 
 	// Only log for locally configured tunnels (Token is blank).
@@ -193,29 +188,6 @@ func StartServer(
 		return err
 	}
 
-	metricsListener, err := metrics.CreateMetricsListener(&listeners, c.String("metrics"))
-	if err != nil {
-		log.Err(err).Msg("Error opening metrics server listener")
-		return errors.Wrap(err, "Error opening metrics server listener")
-	}
-
-	defer metricsListener.Close()
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-		tracker := tunnelstate.NewConnTracker(log)
-		observer.RegisterSink(tracker)
-
-		readinessServer := metrics.NewReadyServer(connectorID, tracker)
-		metricsConfig := metrics.Config{
-			ReadyServer:         readinessServer,
-			QuickTunnelHostname: quickTunnelURL,
-			Orchestrator:        orchestrator,
-		}
-		errC <- metrics.ServeMetrics(metricsListener, ctx, metricsConfig, log)
-	}()
-
 	reconnectCh := make(chan supervisor.ReconnectSignal, 1) // Single connection for quick tunnels
 
 	wg.Add(1)
@@ -284,8 +256,7 @@ func notifySystemd(waitForSignal *signal.Signal) {
 }
 
 func tunnelFlags(shouldHide bool) []cli.Flag {
-	flags := configureCloudflaredFlags(shouldHide)
-	flags = append(flags, configureProxyFlags(shouldHide)...)
+	flags := configureProxyFlags(shouldHide)
 	flags = append(flags, cliutil.ConfigureLoggingFlags(shouldHide)...)
 	flags = append(flags, []cli.Flag{
 		// Internal flag for quick tunnel service URL
@@ -298,18 +269,6 @@ func tunnelFlags(shouldHide bool) []cli.Flag {
 		postQuantumFlag,
 	}...)
 	return flags
-}
-
-// Flags in tunnel command that is relevant to run subcommand
-func configureCloudflaredFlags(shouldHide bool) []cli.Flag {
-	return []cli.Flag{
-		&cli.StringFlag{
-			Name:   cfdflags.Metrics,
-			Value:  "",
-			Usage:  "Listen address for metrics reporting.",
-			Hidden: shouldHide,
-		},
-	}
 }
 
 func configureProxyFlags(shouldHide bool) []cli.Flag {

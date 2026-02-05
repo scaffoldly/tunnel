@@ -32,7 +32,4 @@ const (
 	LogFormatOutput             = "output"
 	LogFormatOutputValueDefault = "default"
 	LogFormatOutputValueJSON    = "json"
-
-	// Metrics is the command line flag to define the address of the metrics server
-	Metrics = "metrics"
 )

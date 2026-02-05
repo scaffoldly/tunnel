@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/urfave/cli/v2"
 	"github.com/urfave/cli/v2/altsrc"
@@ -44,7 +43,6 @@ var (
 	configFlags = []string{
 		flags.Protocol,
 		flags.LogLevel,
-		flags.Metrics,
 	}
 )
 
@@ -181,7 +179,7 @@ func prepareTunnelConfig(
 	}, log)
 
 	// Setup DNS Resolver Service
-	originMetrics := origins.NewMetrics(prometheus.DefaultRegisterer)
+	originMetrics := origins.NewMetrics()
 	dnsService := origins.NewDNSResolverService(origins.NewDNSDialer(), log, originMetrics)
 	originDialerService.AddReservedService(dnsService, []netip.AddrPort{origins.VirtualDNSServiceAddr})
 

@@ -13,7 +13,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 	"github.com/google/uuid"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 	"nhooyr.io/websocket"
 )
@@ -51,9 +50,6 @@ type ManagementService struct {
 	clientID  uuid.UUID
 	label     string
 
-	// Additional Handlers
-	metricsHandler http.Handler
-
 	log    *zerolog.Logger
 	router chi.Router
 
@@ -73,13 +69,12 @@ func New(managementHostname string,
 	logger LoggerListener,
 ) *ManagementService {
 	s := &ManagementService{
-		Hostname:       managementHostname,
-		log:            log,
-		logger:         logger,
-		serviceIP:      serviceIP,
-		clientID:       clientID,
-		label:          label,
-		metricsHandler: promhttp.Handler(),
+		Hostname:  managementHostname,
+		log:       log,
+		logger:    logger,
+		serviceIP: serviceIP,
+		clientID:  clientID,
+		label:     label,
 	}
 	r := chi.NewRouter()
 	r.Use(ValidateAccessTokenQueryMiddleware)
@@ -92,8 +87,6 @@ func New(managementHostname string,
 
 	// Diagnostic management services
 	if enableDiagServices {
-		// Prometheus endpoint
-		r.With(corsHandler).Get("/metrics", s.metricsHandler.ServeHTTP)
 		// Supports only heap and goroutine
 		r.With(corsHandler).Get("/debug/pprof/{profile:heap|goroutine}", pprof.Index)
 	}
