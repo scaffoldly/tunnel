@@ -4,9 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"net/url"
 	"os"
-	"path/filepath"
 	"runtime/trace"
 	"strings"
 	"sync"
@@ -453,31 +451,6 @@ func writePidFile(waitForSignal *signal.Signal, pidPathname string, log *zerolog
 	fmt.Fprintf(file, "%d", os.Getpid())
 }
 
-func hostnameFromURI(uri string) string {
-	u, err := url.Parse(uri)
-	if err != nil {
-		return ""
-	}
-	switch u.Scheme {
-	case "ssh":
-		return addPortIfMissing(u, 22)
-	case "rdp":
-		return addPortIfMissing(u, 3389)
-	case "smb":
-		return addPortIfMissing(u, 445)
-	case "tcp":
-		return addPortIfMissing(u, 7864) // just a random port since there isn't a default in this case
-	}
-	return ""
-}
-
-func addPortIfMissing(uri *url.URL, port int) string {
-	if uri.Port() != "" {
-		return uri.Host
-	}
-	return fmt.Sprintf("%s:%d", uri.Hostname(), port)
-}
-
 func tunnelFlags(shouldHide bool) []cli.Flag {
 	flags := configureCloudflaredFlags(shouldHide)
 	flags = append(flags, configureProxyFlags(shouldHide)...)
@@ -564,101 +537,6 @@ func configureProxyFlags(shouldHide bool) []cli.Flag {
 	}
 }
 
-func sshFlags(shouldHide bool) []cli.Flag {
-	return []cli.Flag{
-		altsrc.NewStringFlag(&cli.StringFlag{
-			Name:    cfdflags.SshPort,
-			Usage:   "Localhost port that cloudflared SSH server will run on",
-			Value:   "2222",
-			EnvVars: []string{"LOCAL_SSH_PORT"},
-			Hidden:  true,
-		}),
-		altsrc.NewDurationFlag(&cli.DurationFlag{
-			Name:    cfdflags.SshIdleTimeout,
-			Usage:   "Connection timeout after no activity",
-			EnvVars: []string{"SSH_IDLE_TIMEOUT"},
-			Hidden:  true,
-		}),
-		altsrc.NewDurationFlag(&cli.DurationFlag{
-			Name:    cfdflags.SshMaxTimeout,
-			Usage:   "Absolute connection timeout",
-			EnvVars: []string{"SSH_MAX_TIMEOUT"},
-			Hidden:  true,
-		}),
-		altsrc.NewStringFlag(&cli.StringFlag{
-			Name:    cfdflags.SshLogUploaderBucketName,
-			Usage:   "Bucket name of where to upload SSH logs",
-			EnvVars: []string{"BUCKET_ID"},
-			Hidden:  true,
-		}),
-		altsrc.NewStringFlag(&cli.StringFlag{
-			Name:    cfdflags.SshLogUploaderRegionName,
-			Usage:   "Region name of where to upload SSH logs",
-			EnvVars: []string{"REGION_ID"},
-			Hidden:  true,
-		}),
-		altsrc.NewStringFlag(&cli.StringFlag{
-			Name:    cfdflags.SshLogUploaderSecretID,
-			Usage:   "Secret ID of where to upload SSH logs",
-			EnvVars: []string{"SECRET_ID"},
-			Hidden:  true,
-		}),
-		altsrc.NewStringFlag(&cli.StringFlag{
-			Name:    cfdflags.SshLogUploaderAccessKeyID,
-			Usage:   "Access Key ID of where to upload SSH logs",
-			EnvVars: []string{"ACCESS_CLIENT_ID"},
-			Hidden:  true,
-		}),
-		altsrc.NewStringFlag(&cli.StringFlag{
-			Name:    cfdflags.SshLogUploaderSessionTokenID,
-			Usage:   "Session Token to use in the configuration of SSH logs uploading",
-			EnvVars: []string{"SESSION_TOKEN_ID"},
-			Hidden:  true,
-		}),
-		altsrc.NewStringFlag(&cli.StringFlag{
-			Name:    cfdflags.SshLogUploaderS3URL,
-			Usage:   "S3 url of where to upload SSH logs",
-			EnvVars: []string{"S3_URL"},
-			Hidden:  true,
-		}),
-		altsrc.NewPathFlag(&cli.PathFlag{
-			Name:    cfdflags.HostKeyPath,
-			Usage:   "Absolute path of directory to save SSH host keys in",
-			EnvVars: []string{"HOST_KEY_PATH"},
-			Hidden:  true,
-		}),
-		altsrc.NewBoolFlag(&cli.BoolFlag{
-			Name:    ingress.SSHServerFlag,
-			Value:   false,
-			Usage:   "Run an SSH Server",
-			EnvVars: []string{"TUNNEL_SSH_SERVER"},
-			Hidden:  true, // TODO: remove when feature is complete
-		}),
-		altsrc.NewBoolFlag(&cli.BoolFlag{
-			Name:    config.BastionFlag,
-			Value:   false,
-			Usage:   "Runs as jump host",
-			EnvVars: []string{"TUNNEL_BASTION"},
-			Hidden:  shouldHide,
-		}),
-		altsrc.NewStringFlag(&cli.StringFlag{
-			Name:    ingress.ProxyAddressFlag,
-			Usage:   "Listen address for the proxy.",
-			Value:   "127.0.0.1",
-			EnvVars: []string{"TUNNEL_PROXY_ADDRESS"},
-			Hidden:  shouldHide,
-		}),
-		// Note TUN-3758 , we use Int because UInt is not supported with altsrc
-		altsrc.NewIntFlag(&cli.IntFlag{
-			Name:    ingress.ProxyPortFlag,
-			Usage:   "Listen port for the proxy.",
-			Value:   0,
-			EnvVars: []string{"TUNNEL_PROXY_PORT"},
-			Hidden:  shouldHide,
-		}),
-	}
-}
-
 func stdinControl(reconnectCh chan supervisor.ReconnectSignal, log *zerolog.Logger) {
 	for {
 		scanner := bufio.NewScanner(os.Stdin)
@@ -692,45 +570,3 @@ reconnect [delay]
 	}
 }
 
-func nonSecretCliFlags(log *zerolog.Logger, cli *cli.Context, flagInclusionList []string) map[string]string {
-	flagsNames := cli.FlagNames()
-	flags := make(map[string]string, len(flagsNames))
-
-	for _, flag := range flagsNames {
-		value := cli.String(flag)
-
-		if value == "" {
-			continue
-		}
-
-		isIncluded := isFlagIncluded(flagInclusionList, flag)
-		if !isIncluded {
-			continue
-		}
-
-		switch flag {
-		case cfdflags.LogDirectory, cfdflags.LogFile:
-			{
-				absolute, err := filepath.Abs(value)
-				if err != nil {
-					log.Error().Err(err).Msgf("could not convert %s path to absolute", flag)
-				} else {
-					flags[flag] = absolute
-				}
-			}
-		default:
-			flags[flag] = value
-		}
-	}
-	return flags
-}
-
-func isFlagIncluded(flagInclusionList []string, flag string) bool {
-	for _, include := range flagInclusionList {
-		if include == flag {
-			return true
-		}
-	}
-
-	return false
-}

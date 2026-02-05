@@ -8,10 +8,6 @@ import (
 	"github.com/cloudflare/cloudflared/logger"
 )
 
-func Action(actionFunc cli.ActionFunc) cli.ActionFunc {
-	return WithErrorHandler(actionFunc)
-}
-
 func ConfiguredAction(actionFunc cli.ActionFunc) cli.ActionFunc {
 	// Adapt actionFunc to the type signature required by ConfiguredActionWithWarnings
 	f := func(context *cli.Context, _ string) error {

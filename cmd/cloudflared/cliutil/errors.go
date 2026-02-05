@@ -12,14 +12,6 @@ func (ue usageError) Error() string {
 	return string(ue)
 }
 
-func UsageError(format string, args ...interface{}) error {
-	if len(args) == 0 {
-		return usageError(format)
-	} else {
-		msg := fmt.Sprintf(format, args...)
-		return usageError(msg)
-	}
-}
 
 // Ensures exit with error code if actionFunc returns an error
 func WithErrorHandler(actionFunc cli.ActionFunc) cli.ActionFunc {

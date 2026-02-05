@@ -1,13 +1,6 @@
 package tunnel
 
 import (
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
-	"path/filepath"
-
-	"github.com/google/uuid"
-	"github.com/mitchellh/go-homedir"
 	"github.com/urfave/cli/v2"
 	"github.com/urfave/cli/v2/altsrc"
 
@@ -64,22 +57,3 @@ var (
 	})
 )
 
-func tunnelFilePath(tunnelID uuid.UUID, directory string) (string, error) {
-	fileName := fmt.Sprintf("%v.json", tunnelID)
-	filePath := filepath.Clean(fmt.Sprintf("%s/%s", directory, fileName))
-	return homedir.Expand(filePath)
-}
-
-// ParseToken parses a tunnel token string
-func ParseToken(tokenStr string) (*connection.TunnelToken, error) {
-	content, err := base64.StdEncoding.DecodeString(tokenStr)
-	if err != nil {
-		return nil, err
-	}
-
-	var token connection.TunnelToken
-	if err := json.Unmarshal(content, &token); err != nil {
-		return nil, err
-	}
-	return &token, nil
-}
