@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/getsentry/sentry-go"
 	"github.com/urfave/cli/v2"
 	"go.uber.org/automaxprocs/maxprocs"
 
@@ -23,17 +22,6 @@ var (
 	Version   = "DEV"
 	BuildTime = "unknown"
 	BuildType = ""
-	// Mostly network errors that we don't want reported back to Sentry, this is done by substring match.
-	ignoredErrors = []string{
-		"connection reset by peer",
-		"An existing connection was forcibly closed by the remote host.",
-		"use of closed connection",
-		"You need to enable Argo Smart Routing",
-		"3001 connection closed",
-		"3002 connection dropped",
-		"rpc exception: dial tcp",
-		"rpc exception: EOF",
-	}
 )
 
 func main() {
@@ -118,26 +106,8 @@ func action(graceShutdownC chan struct{}) cli.ActionFunc {
 		if isEmptyInvocation(c) {
 			return handleServiceMode(c, graceShutdownC)
 		}
-		func() {
-			defer sentry.Recover()
-			err = tunnel.TunnelCommand(c)
-		}()
-		if err != nil {
-			captureError(err)
-		}
-		return err
+		return tunnel.TunnelCommand(c)
 	})
-}
-
-// In order to keep the amount of noise sent to Sentry low, typical network errors can be filtered out here by a substring match.
-func captureError(err error) {
-	errorMessage := err.Error()
-	for _, ignoredErrorMessage := range ignoredErrors {
-		if strings.Contains(errorMessage, ignoredErrorMessage) {
-			return
-		}
-	}
-	sentry.CaptureException(err)
 }
 
 // cloudflared was started without any flags

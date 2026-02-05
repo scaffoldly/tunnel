@@ -12,7 +12,6 @@ import (
 
 	"github.com/coreos/go-systemd/v22/daemon"
 	"github.com/facebookgo/grace/gracenet"
-	"github.com/getsentry/sentry-go"
 	"github.com/mitchellh/go-homedir"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -36,8 +35,6 @@ import (
 )
 
 const (
-	sentryDSN = "https://56a9c9fa5c364ab28f34b14f35ea0f1b:3e8827f6f9f740738eb11138f7bebb68@sentry.io/189878"
-
 	LogFieldCommand             = "command"
 	LogFieldExpandedPath        = "expandedPath"
 	LogFieldPIDPathname         = "pidPathname"
@@ -221,13 +218,6 @@ func StartServer(
 	namedTunnel *connection.TunnelProperties,
 	log *zerolog.Logger,
 ) error {
-	err := sentry.Init(sentry.ClientOptions{
-		Dsn:     sentryDSN,
-		Release: c.App.Version,
-	})
-	if err != nil {
-		return err
-	}
 	var wg sync.WaitGroup
 	listeners := gracenet.Net{}
 	errC := make(chan error)
