@@ -40,11 +40,11 @@ func Flags() []cli.Flag {
 
 func Commands() []*cli.Command {
 	return []*cli.Command{
-		buildTunnelCommand(nil),
+		buildCloudflareCommand(nil),
 	}
 }
 
-func buildTunnelCommand(subcommands []*cli.Command) *cli.Command {
+func buildCloudflareCommand(subcommands []*cli.Command) *cli.Command {
 	return &cli.Command{
 		Name:      "cloudflare",
 		Action:    cliutil.ConfiguredAction(TunnelCommand),
