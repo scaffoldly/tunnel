@@ -4,36 +4,6 @@ const (
 	// HaConnections specifies how many connections to make to the edge
 	HaConnections = "ha-connections"
 
-	// SshPort is the port on localhost the cloudflared ssh server will run on
-	SshPort = "local-ssh-port"
-
-	// SshIdleTimeout defines the duration a SSH session can remain idle before being closed
-	SshIdleTimeout = "ssh-idle-timeout"
-
-	// SshMaxTimeout defines the max duration a SSH session can remain open for
-	SshMaxTimeout = "ssh-max-timeout"
-
-	// SshLogUploaderBucketName is the bucket name to use for the SSH log uploader
-	SshLogUploaderBucketName = "bucket-name"
-
-	// SshLogUploaderRegionName is the AWS region name to use for the SSH log uploader
-	SshLogUploaderRegionName = "region-name"
-
-	// SshLogUploaderSecretID is the Secret id of SSH log uploader
-	SshLogUploaderSecretID = "secret-id"
-
-	// SshLogUploaderAccessKeyID is the Access key id of SSH log uploader
-	SshLogUploaderAccessKeyID = "access-key-id"
-
-	// SshLogUploaderSessionTokenID is the Session token of SSH log uploader
-	SshLogUploaderSessionTokenID = "session-token"
-
-	// SshLogUploaderS3URL is the S3 URL of SSH log uploader (e.g. don't use AWS s3 and use google storage bucket instead)
-	SshLogUploaderS3URL = "s3-url-host"
-
-	// HostKeyPath is the path of the dir to save SSH host keys too
-	HostKeyPath = "host-key-path"
-
 	// RpcTimeout is how long to wait for a Capnp RPC request to the edge
 	RpcTimeout = "rpc-timeout"
 
@@ -81,9 +51,6 @@ const (
 	// EdgeBindAddress is the command line flag to bind to IP address for outgoing connections to Cloudflare Edge
 	EdgeBindAddress = "edge-bind-address"
 
-	// Force is the command line flag to specify if you wish to force an action
-	Force = "force"
-
 	// Edge is the command line flag to set the address of the Cloudflare tunnel server. Only works in Cloudflare's internal testing environment
 	Edge = "edge"
 
@@ -123,9 +90,6 @@ const (
 	// LogLevel is the command line flag for the cloudflared logging level
 	LogLevel = "loglevel"
 
-	// LogLevelSSH is the command line flag for the cloudflared ssh logging level
-	LogLevelSSH = "log-level"
-
 	// TransportLogLevel is the command line flag for the transport logging level
 	TransportLogLevel = "transport-loglevel"
 
@@ -160,7 +124,4 @@ const (
 
 	// Management hostname to signify incoming management requests
 	ManagementHostname = "management-hostname"
-
-	// Automatically close the login interstitial browser window after the user makes a decision.
-	AutoCloseInterstitial = "auto-close"
 )
