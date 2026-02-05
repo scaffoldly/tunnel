@@ -34,7 +34,6 @@ const (
 	HTTPHostHeaderFlag            = "http-host-header"
 	OriginServerNameFlag          = "origin-server-name"
 	MatchSNIToHostFlag            = "match-sni-to-host"
-	NoTLSVerifyFlag               = "no-tls-verify"
 	NoChunkedEncodingFlag         = "no-chunked-encoding"
 	ProxyAddressFlag              = "proxy-address"
 	ProxyPortFlag                 = "proxy-port"
@@ -130,7 +129,7 @@ func originRequestFromSingleRule(c *cli.Context) OriginRequestConfig {
 	var originServerName string
 	var matchSNItoHost bool
 	var caPool string
-	var noTLSVerify bool
+	noTLSVerify := true // Skip TLS verification for quick tunnels
 	var disableChunkedEncoding bool
 	var bastionMode bool
 	var proxyAddress = defaultProxyAddress
@@ -166,9 +165,6 @@ func originRequestFromSingleRule(c *cli.Context) OriginRequestConfig {
 	}
 	if flag := tlsconfig.OriginCAPoolFlag; c.IsSet(flag) {
 		caPool = c.String(flag)
-	}
-	if flag := NoTLSVerifyFlag; c.IsSet(flag) {
-		noTLSVerify = c.Bool(flag)
 	}
 	if flag := NoChunkedEncodingFlag; c.IsSet(flag) {
 		disableChunkedEncoding = c.Bool(flag)

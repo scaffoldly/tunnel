@@ -350,12 +350,6 @@ func configureProxyFlags(shouldHide bool) []cli.Flag {
 			EnvVars: []string{"TUNNEL_URL"},
 			Hidden:  shouldHide,
 		}),
-		altsrc.NewBoolFlag(&cli.BoolFlag{
-			Name:    ingress.NoTLSVerifyFlag,
-			Usage:   "Disables TLS verification of the certificate presented by your origin.",
-			EnvVars: []string{"NO_TLS_VERIFY"},
-			Hidden:  shouldHide,
-		}),
 	}
 }
 
