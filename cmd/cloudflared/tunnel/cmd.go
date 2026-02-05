@@ -97,7 +97,7 @@ func TunnelCommand(c *cli.Context) error {
 
 	// Run a quick tunnel
 	// A unauthenticated named tunnel hosted on <random>.<quick-tunnels-service>.com
-	shouldRunQuickTunnel := c.IsSet("url") || c.String("url") != "" || c.IsSet(ingress.HelloWorldFlag)
+	shouldRunQuickTunnel := c.IsSet("url") || c.String("url") != ""
 	if c.String("quick-service") != "" && shouldRunQuickTunnel {
 		return RunQuickTunnel(sc)
 	}

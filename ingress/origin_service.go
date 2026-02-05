@@ -15,7 +15,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 
-	"github.com/cloudflare/cloudflared/hello"
 	"github.com/cloudflare/cloudflared/ipaccess"
 	"github.com/cloudflare/cloudflared/management"
 	"github.com/cloudflare/cloudflared/socks"
@@ -23,8 +22,6 @@ import (
 )
 
 const (
-	HelloWorldService = "hello_world"
-	HelloWorldFlag    = "hello-world"
 	HttpStatusService = "http_status"
 )
 
@@ -187,46 +184,6 @@ func (o socksProxyOverWSService) MarshalJSON() ([]byte, error) {
 	return json.Marshal(o.String())
 }
 
-// HelloWorld is an OriginService for the built-in Hello World server.
-// Users only use this for testing and experimenting with cloudflared.
-type helloWorld struct {
-	httpService
-	server net.Listener
-}
-
-func (o *helloWorld) String() string {
-	return HelloWorldService
-}
-
-// Start starts a HelloWorld server and stores its address in the Service receiver.
-func (o *helloWorld) start(
-	log *zerolog.Logger,
-	shutdownC <-chan struct{},
-	cfg OriginRequestConfig,
-) error {
-	if err := o.httpService.start(log, shutdownC, cfg); err != nil {
-		return err
-	}
-
-	helloListener, err := hello.CreateTLSListener("127.0.0.1:")
-	if err != nil {
-		return errors.Wrap(err, "Cannot start Hello World Server")
-	}
-	go hello.StartHelloWorldServer(log, helloListener, shutdownC)
-	o.server = helloListener
-
-	o.httpService.url = &url.URL{
-		Scheme: "https",
-		Host:   o.server.Addr().String(),
-	}
-
-	return nil
-}
-
-func (o helloWorld) MarshalJSON() ([]byte, error) {
-	return json.Marshal(o.String())
-}
-
 // statusCode is an OriginService that just responds with a given HTTP status.
 // Typical use-case is "user wants the catch-all rule to just respond 404".
 type statusCode struct {
@@ -319,7 +276,7 @@ func newHTTPTransport(service OriginService, cfg OriginRequestConfig, log *zerol
 		TLSClientConfig:       &tls.Config{RootCAs: originCertPool, InsecureSkipVerify: cfg.NoTLSVerify},
 		ForceAttemptHTTP2:     cfg.Http2Origin,
 	}
-	if _, isHelloWorld := service.(*helloWorld); !isHelloWorld && cfg.OriginServerName != "" {
+	if cfg.OriginServerName != "" {
 		httpTransport.TLSClientConfig.ServerName = cfg.OriginServerName
 	}
 

@@ -106,7 +106,6 @@ func ParseIngressFromConfigAndCLI(conf *config.Configuration, c *cli.Context, lo
 	}
 	// Attempt to parse ingress rules from CLI:
 	//   --url or --unix-socket flag for a tunnel HTTP ingress
-	//   --hello-world for a basic HTTP ingress self-served
 	//   --bastion for ssh bastion service
 	ingressRules, err = parseCLIIngress(c, false)
 	if errors.Is(err, ErrNoIngressRulesCLI) {
@@ -126,7 +125,7 @@ func ParseIngressFromConfigAndCLI(conf *config.Configuration, c *cli.Context, lo
 }
 
 // parseCLIIngress constructs an Ingress set with only one rule constructed from
-// CLI parameters: --url, --hello-world, --bastion, or --unix-socket
+// CLI parameters: --url, --bastion, or --unix-socket
 func parseCLIIngress(c *cli.Context, allowURLFromArgs bool) (Ingress, error) {
 	service, err := parseSingleOriginService(c, allowURLFromArgs)
 	if err != nil {
@@ -161,9 +160,6 @@ func newDefaultOrigin(c *cli.Context, log *zerolog.Logger) Ingress {
 
 // Get a single origin service from the CLI/config.
 func parseSingleOriginService(c *cli.Context, allowURLFromArgs bool) (OriginService, error) {
-	if c.IsSet(HelloWorldFlag) {
-		return new(helloWorld), nil
-	}
 	if c.IsSet(config.BastionFlag) {
 		return newBastionService(), nil
 	}
@@ -265,8 +261,6 @@ func validateIngress(ingress []config.UnvalidatedIngressRule, defaults OriginReq
 			}
 			srv := newStatusCode(statusCode)
 			service = &srv
-		} else if r.Service == HelloWorldFlag || r.Service == HelloWorldService {
-			service = new(helloWorld)
 		} else if r.Service == ServiceSocksProxy {
 			rules := make([]ipaccess.Rule, len(r.OriginRequest.IPRules))
 

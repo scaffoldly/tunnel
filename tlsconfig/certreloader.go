@@ -136,12 +136,5 @@ func loadGlobalCertPool(log *zerolog.Logger) (*x509.CertPool, error) {
 		certPool.AddCert(cert)
 	}
 
-	// Finally, add the Hello certificate into the pool (since it's self-signed)
-	helloCert, err := GetHelloCertificateX509()
-	if err != nil {
-		return nil, errors.Wrap(err, "could not append Hello server certificate to cloudflared certificate pool")
-	}
-	certPool.AddCert(helloCert)
-
 	return certPool, nil
 }
