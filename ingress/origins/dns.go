@@ -64,13 +64,6 @@ func NewDNSResolverService(dialer ingress.OriginDialer, logger *zerolog.Logger, 
 	}
 }
 
-func NewStaticDNSResolverService(resolverAddrs []netip.AddrPort, dialer ingress.OriginDialer, logger *zerolog.Logger, metrics Metrics) *DNSResolverService {
-	s := NewDNSResolverService(dialer, logger, metrics)
-	s.addresses = resolverAddrs
-	s.static = true
-	return s
-}
-
 func (s *DNSResolverService) DialTCP(ctx context.Context, _ netip.AddrPort) (net.Conn, error) {
 	s.metrics.IncrementDNSTCPRequests()
 	dest := s.getAddress()
