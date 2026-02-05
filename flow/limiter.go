@@ -44,7 +44,6 @@ func (s *flowLimiter) Acquire(flowType string) error {
 	defer s.limiterLock.Unlock()
 
 	if !s.unlimited && s.activeFlowsCounter >= s.maxActiveFlows {
-		flowRegistrationsDropped.WithLabelValues(flowType).Inc()
 		return ErrTooManyActiveFlows
 	}
 

@@ -17,7 +17,6 @@ import (
 	cfdflow "github.com/cloudflare/cloudflared/flow"
 	"github.com/cloudflare/cloudflared/management"
 
-	"github.com/cloudflare/cloudflared/carrier"
 	"github.com/cloudflare/cloudflared/cfio"
 	"github.com/cloudflare/cloudflared/connection"
 	"github.com/cloudflare/cloudflared/ingress"
@@ -387,10 +386,5 @@ func copyTrailers(w connection.ResponseWriter, response *http.Response) {
 }
 
 func getDestFromRule(rule *ingress.Rule, req *http.Request) (string, error) {
-	switch rule.Service.String() {
-	case ingress.ServiceBastion:
-		return carrier.ResolveBastionDest(req)
-	default:
-		return rule.Service.String(), nil
-	}
+	return rule.Service.String(), nil
 }

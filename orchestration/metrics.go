@@ -1,25 +1,17 @@
 package orchestration
 
-import (
-	"github.com/prometheus/client_golang/prometheus"
-)
+// Metrics removed - prometheus dependency eliminated
 
 const (
 	MetricsNamespace = "cloudflared"
 	MetricsSubsystem = "orchestration"
 )
 
-var (
-	configVersion = prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Namespace: MetricsNamespace,
-			Subsystem: MetricsSubsystem,
-			Name:      "config_version",
-			Help:      "Configuration Version",
-		},
-	)
-)
+// noopGauge is a no-op gauge
+type noopGauge struct{}
 
-func init() {
-	prometheus.MustRegister(configVersion)
+func (n *noopGauge) Set(v float64) {
+	// no-op: metrics disabled
 }
+
+var configVersion = &noopGauge{}

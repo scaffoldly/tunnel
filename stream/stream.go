@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/getsentry/sentry-go"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 
@@ -123,8 +122,6 @@ func unidirectionalStream(dst WriterCloser, src Reader, dir string, status *bidi
 			} else {
 				// Otherwise, this is unexpected, but we prevent the program from crashing anyway.
 				log.Warn().Msgf("recovered from panic in stream.Pipe for %s, error %s, %s", dir, err, debug.Stack())
-				sentry.CurrentHub().Recover(err)
-				sentry.Flush(time.Second * 5)
 			}
 		}
 	}()

@@ -28,10 +28,6 @@ type SessionManager_PogsImpl struct {
 	impl SessionManager
 }
 
-func SessionManager_ServerToClient(s SessionManager) proto.SessionManager {
-	return proto.SessionManager_ServerToClient(SessionManager_PogsImpl{s})
-}
-
 func (i SessionManager_PogsImpl) RegisterUdpSession(p proto.SessionManager_registerUdpSession) error {
 	return metrics.ObserveServerHandler(func() error { return i.registerUdpSession(p) }, metrics.SessionManager, metrics.OperationRegisterUdpSession)
 }
@@ -151,33 +147,6 @@ func NewSessionManager_PogsClient(client capnp.Client, conn *rpc.Conn) SessionMa
 func (c SessionManager_PogsClient) Close() error {
 	c.Client.Close()
 	return c.Conn.Close()
-}
-
-func (c SessionManager_PogsClient) RegisterUdpSession(ctx context.Context, sessionID uuid.UUID, dstIP net.IP, dstPort uint16, closeAfterIdleHint time.Duration, traceContext string) (*RegisterUdpSessionResponse, error) {
-	client := proto.SessionManager{Client: c.Client}
-	promise := client.RegisterUdpSession(ctx, func(p proto.SessionManager_registerUdpSession_Params) error {
-		if err := p.SetSessionId(sessionID[:]); err != nil {
-			return err
-		}
-		if err := p.SetDstIp(dstIP); err != nil {
-			return err
-		}
-		p.SetDstPort(dstPort)
-		p.SetCloseAfterIdleHint(int64(closeAfterIdleHint))
-		_ = p.SetTraceContext(traceContext)
-		return nil
-	})
-	result, err := promise.Result().Struct()
-	if err != nil {
-		return nil, wrapRPCError(err)
-	}
-	response := new(RegisterUdpSessionResponse)
-
-	err = response.Unmarshal(result)
-	if err != nil {
-		return nil, err
-	}
-	return response, nil
 }
 
 func (c SessionManager_PogsClient) UnregisterUdpSession(ctx context.Context, sessionID uuid.UUID, message string) error {

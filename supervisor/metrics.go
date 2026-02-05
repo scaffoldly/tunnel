@@ -1,27 +1,16 @@
 package supervisor
 
-import (
-	"github.com/prometheus/client_golang/prometheus"
+// Metrics removed - prometheus dependency eliminated
 
-	"github.com/cloudflare/cloudflared/connection"
-)
+// noopGauge is a no-op gauge
+type noopGauge struct{}
 
-// Metrics uses connection.MetricsNamespace(aka cloudflared) as namespace and connection.TunnelSubsystem
-// (tunnel) as subsystem to keep them consistent with the previous qualifier.
-
-var (
-	haConnections = prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Namespace: connection.MetricsNamespace,
-			Subsystem: connection.TunnelSubsystem,
-			Name:      "ha_connections",
-			Help:      "Number of active ha connections",
-		},
-	)
-)
-
-func init() {
-	prometheus.MustRegister(
-		haConnections,
-	)
+func (n *noopGauge) Inc() {
+	// no-op: metrics disabled
 }
+
+func (n *noopGauge) Dec() {
+	// no-op: metrics disabled
+}
+
+var haConnections = &noopGauge{}

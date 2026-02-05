@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-
-	"github.com/pkg/errors"
 )
 
 var (
@@ -111,38 +109,3 @@ func SerializeHeaders(h1Headers http.Header) string {
 	return buf.String()
 }
 
-// Deserialize headers serialized by `SerializeHeader`
-func DeserializeHeaders(serializedHeaders string) ([]HTTPHeader, error) {
-	const unableToDeserializeErr = "Unable to deserialize headers"
-
-	deserialized := make([]HTTPHeader, 0)
-	for _, serializedPair := range strings.Split(serializedHeaders, ";") {
-		if len(serializedPair) == 0 {
-			continue
-		}
-
-		serializedHeaderParts := strings.Split(serializedPair, ":")
-		if len(serializedHeaderParts) != 2 {
-			return nil, errors.New(unableToDeserializeErr)
-		}
-
-		serializedName := serializedHeaderParts[0]
-		serializedValue := serializedHeaderParts[1]
-		deserializedName := make([]byte, headerEncoding.DecodedLen(len(serializedName)))
-		deserializedValue := make([]byte, headerEncoding.DecodedLen(len(serializedValue)))
-
-		if _, err := headerEncoding.Decode(deserializedName, []byte(serializedName)); err != nil {
-			return nil, errors.Wrap(err, unableToDeserializeErr)
-		}
-		if _, err := headerEncoding.Decode(deserializedValue, []byte(serializedValue)); err != nil {
-			return nil, errors.Wrap(err, unableToDeserializeErr)
-		}
-
-		deserialized = append(deserialized, HTTPHeader{
-			Name:  string(deserializedName),
-			Value: string(deserializedValue),
-		})
-	}
-
-	return deserialized, nil
-}
