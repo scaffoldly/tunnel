@@ -11,24 +11,13 @@ const (
 	WriteStreamTimeout = "write-stream-timeout"
 
 	// QuicDisablePathMTUDiscovery sets if QUIC should not perform PTMU discovery and use a smaller (safe) packet size.
-	// Packets will then be at most 1252 (IPv4) / 1232 (IPv6) bytes in size.
-	// Note that this may result in packet drops for UDP proxying, since we expect being able to send at least 1280 bytes of inner packets.
 	QuicDisablePathMTUDiscovery = "quic-disable-pmtu-discovery"
 
-	// QuicConnLevelFlowControlLimit controls the max flow control limit allocated for a QUIC connection. This controls how much data is the
-	// receiver willing to buffer. Once the limit is reached, the sender will send a DATA_BLOCKED frame to indicate it has more data to write,
-	// but it's blocked by flow control
+	// QuicConnLevelFlowControlLimit controls the max flow control limit allocated for a QUIC connection.
 	QuicConnLevelFlowControlLimit = "quic-connection-level-flow-control-limit"
 
-	// QuicStreamLevelFlowControlLimit is similar to quicConnLevelFlowControlLimit but for each QUIC stream. When the sender is blocked,
-	// it will send a STREAM_DATA_BLOCKED frame
+	// QuicStreamLevelFlowControlLimit is similar to quicConnLevelFlowControlLimit but for each QUIC stream.
 	QuicStreamLevelFlowControlLimit = "quic-stream-level-flow-control-limit"
-
-	// Ui is to enable launching cloudflared in interactive UI mode
-	Ui = "ui"
-
-	// ConnectorLabel is the command line flag to give a meaningful label to a specific connector
-	ConnectorLabel = "label"
 
 	// MaxActiveFlows is the command line flag to set the maximum number of flows that cloudflared can be processing at the same time
 	MaxActiveFlows = "max-active-flows"
@@ -51,7 +40,7 @@ const (
 	// EdgeBindAddress is the command line flag to bind to IP address for outgoing connections to Cloudflare Edge
 	EdgeBindAddress = "edge-bind-address"
 
-	// Edge is the command line flag to set the address of the Cloudflare tunnel server. Only works in Cloudflare's internal testing environment
+	// Edge is the command line flag to set the address of the Cloudflare tunnel server.
 	Edge = "edge"
 
 	// Region is the command line flag to set the Cloudflare Edge region to connect to
@@ -78,15 +67,6 @@ const (
 	// ICMPV6Src is the command line flag to set the source address and the interface name to send/receive ICMPv6 messages
 	ICMPV6Src = "icmpv6-src"
 
-	// Name is the command line to set the name of the tunnel
-	Name = "name"
-
-	// AutoUpdateFreq is the command line for setting the frequency that cloudflared checks for updates
-	AutoUpdateFreq = "autoupdate-freq"
-
-	// NoAutoUpdate is the command line flag to disable cloudflared from checking for updates
-	NoAutoUpdate = "no-autoupdate"
-
 	// LogLevel is the command line flag for the cloudflared logging level
 	LogLevel = "loglevel"
 
@@ -104,24 +84,9 @@ const (
 	LogFormatOutputValueDefault = "default"
 	LogFormatOutputValueJSON    = "json"
 
-	// TraceOutput is the command line flag to set the name of trace output file
-	TraceOutput = "trace-output"
-
-	// OriginCert is the command line flag to define the path for the origin certificate used by cloudflared
-	OriginCert = "origincert"
-
 	// Metrics is the command line flag to define the address of the metrics server
 	Metrics = "metrics"
 
-	// MetricsUpdateFreq is the command line flag to define how frequently tunnel metrics are updated
-	MetricsUpdateFreq = "metrics-update-freq"
-
-	// ApiURL is the command line flag used to define the base URL of the API
-	ApiURL = "api-url"
-
 	// Virtual DNS resolver service resolver addresses to use instead of dynamically fetching them from the OS.
 	VirtualDNSServiceResolverAddresses = "dns-resolver-addrs"
-
-	// Management hostname to signify incoming management requests
-	ManagementHostname = "management-hostname"
 )

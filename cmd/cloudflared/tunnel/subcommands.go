@@ -9,26 +9,10 @@ import (
 )
 
 const (
-	CredFileFlag     = "credentials-file"
-	CredContentsFlag = "credentials-contents"
-	TunnelTokenFlag  = "token"
-
-	LogFieldTunnelID     = "tunnelID"
-	overwriteDNSFlagName = "overwrite-dns"
+	TunnelTokenFlag = "token"
 )
 
 var (
-	credentialsFileFlag = altsrc.NewStringFlag(&cli.StringFlag{
-		Name:    CredFileFlag,
-		Aliases: []string{"cred-file"},
-		Usage:   "Filepath at which to read/write the tunnel credentials",
-		EnvVars: []string{"TUNNEL_CRED_FILE"},
-	})
-	credentialsContentsFlag = altsrc.NewStringFlag(&cli.StringFlag{
-		Name:    CredContentsFlag,
-		Usage:   "Contents of the tunnel credentials JSON file to use.",
-		EnvVars: []string{"TUNNEL_CRED_CONTENTS"},
-	})
 	tunnelTokenFlag = altsrc.NewStringFlag(&cli.StringFlag{
 		Name:    TunnelTokenFlag,
 		Usage:   "The Tunnel token.",
@@ -42,12 +26,6 @@ var (
 		EnvVars: []string{"TUNNEL_TRANSPORT_PROTOCOL"},
 		Hidden:  true,
 	})
-	overwriteDNSFlag = &cli.BoolFlag{
-		Name:    overwriteDNSFlagName,
-		Aliases: []string{"f"},
-		Usage:   `Overwrites existing DNS records with this hostname`,
-		EnvVars: []string{"TUNNEL_FORCE_PROVISIONING_DNS"},
-	}
 	postQuantumFlag = altsrc.NewBoolFlag(&cli.BoolFlag{
 		Name:    "post-quantum",
 		Usage:   "When given creates an experimental post-quantum secure tunnel",

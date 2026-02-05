@@ -39,21 +39,12 @@ const (
 )
 
 var (
-	secretFlags = [2]*altsrc.StringFlag{credentialsContentsFlag, tunnelTokenFlag}
+	secretFlags = [1]*altsrc.StringFlag{tunnelTokenFlag}
 
 	configFlags = []string{
-		flags.AutoUpdateFreq,
-		flags.NoAutoUpdate,
-		flags.Retries,
 		flags.Protocol,
 		flags.LogLevel,
-		flags.TransportLogLevel,
-		flags.OriginCert,
 		flags.Metrics,
-		flags.MetricsUpdateFreq,
-		flags.EdgeIpVersion,
-		flags.EdgeBindAddress,
-		flags.MaxActiveFlows,
 	}
 )
 
