@@ -21,7 +21,6 @@ import (
 	"github.com/cloudflare/cloudflared/edgediscovery"
 	"github.com/cloudflare/cloudflared/edgediscovery/allregions"
 	"github.com/cloudflare/cloudflared/features"
-	"github.com/cloudflare/cloudflared/fips"
 	"github.com/cloudflare/cloudflared/ingress"
 	"github.com/cloudflare/cloudflared/ingress/origins"
 	"github.com/cloudflare/cloudflared/management"
@@ -553,7 +552,7 @@ func (e *EdgeTunnelServer) serveQUIC(
 	tlsConfig := e.config.EdgeTLSConfigs[connection.QUIC]
 
 	pqMode := connOptions.FeatureSnapshot.PostQuantum
-	curvePref, err := curvePreference(pqMode, fips.IsFipsEnabled(), tlsConfig.CurvePreferences)
+	curvePref, err := curvePreference(pqMode, false, tlsConfig.CurvePreferences)
 	if err != nil {
 		connLogger.ConnAwareLogger().Err(err).Msgf("failed to get curve preferences")
 		return err, true

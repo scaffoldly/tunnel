@@ -5,7 +5,6 @@ import (
 	"github.com/urfave/cli/v2/altsrc"
 
 	"github.com/cloudflare/cloudflared/connection"
-	"github.com/cloudflare/cloudflared/fips"
 )
 
 const (
@@ -31,7 +30,6 @@ var (
 		Usage:   "When given creates an experimental post-quantum secure tunnel",
 		Aliases: []string{"pq"},
 		EnvVars: []string{"TUNNEL_POST_QUANTUM"},
-		Hidden:  fips.IsFipsEnabled(),
 	})
 )
 
