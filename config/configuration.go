@@ -2,66 +2,21 @@ package config
 
 import (
 	"encoding/json"
-	"fmt"
-	"io"
+	"errors"
 	"net/url"
-	"os"
-	"runtime"
 	"strconv"
 	"time"
 
-	"github.com/pkg/errors"
-	"github.com/rs/zerolog"
 	"github.com/urfave/cli/v2"
-	yaml "gopkg.in/yaml.v3"
 
 	"github.com/cloudflare/cloudflared/validation"
 )
 
 var (
-	// DefaultConfigFiles is the file names from which we attempt to read configuration.
-	DefaultConfigFiles = []string{"config.yml", "config.yaml"}
-
-	// DefaultUnixConfigLocation is the primary location to find a config file
-	DefaultUnixConfigLocation = "/usr/local/etc/cloudflared"
-
-	// DefaultUnixLogLocation is the primary location to find log files
-	DefaultUnixLogLocation = "/var/log/cloudflared"
-
-	// Launchd doesn't set root env variables, so there is default
-	// Windows default config dir was ~/cloudflare-warp in documentation; let's keep it compatible
-	defaultUserConfigDirs = []string{"~/.cloudflared", "~/.cloudflare-warp", "~/cloudflare-warp"}
-	defaultNixConfigDirs  = []string{"/etc/cloudflared", DefaultUnixConfigLocation}
-
-	ErrNoConfigFile = fmt.Errorf("Cannot determine default configuration path. No file %v in %v", DefaultConfigFiles, DefaultConfigSearchDirectories())
+	ErrNoConfigFile = errors.New("config files not supported in this build")
 )
-
-const (
-	// BastionFlag is to enable bastion, or jump host, operation
-	BastionFlag = "bastion"
-)
-
-// DefaultConfigSearchDirectories returns the default folder locations of the config
-func DefaultConfigSearchDirectories() []string {
-	dirs := make([]string, len(defaultUserConfigDirs))
-	copy(dirs, defaultUserConfigDirs)
-	if runtime.GOOS != "windows" {
-		dirs = append(dirs, defaultNixConfigDirs...)
-	}
-	return dirs
-}
-
-// ValidateUnixSocket ensures --unix-socket param is used exclusively
-// i.e. it fails if a user specifies both --url and --unix-socket
-func ValidateUnixSocket(c *cli.Context) (string, error) {
-	if c.IsSet("unix-socket") && (c.IsSet("url") || c.NArg() > 0) {
-		return "", errors.New("--unix-socket must be used exclusively.")
-	}
-	return c.String("unix-socket"), nil
-}
 
 // ValidateUrl will validate url flag correctness. It can be either from --url or argument
-// Notice ValidateUnixSocket, it will enforce --unix-socket is not used with --url or argument
 func ValidateUrl(c *cli.Context, allowURLFromArgs bool) (*url.URL, error) {
 	var url = c.String("url")
 	if allowURLFromArgs && c.NArg() > 0 {
@@ -157,7 +112,6 @@ type Configuration struct {
 	Ingress       []UnvalidatedIngressRule
 	WarpRouting   WarpRoutingConfig   `yaml:"warp-routing"`
 	OriginRequest OriginRequestConfig `yaml:"originRequest"`
-	sourceFile    string
 }
 
 type WarpRoutingConfig struct {
@@ -166,160 +120,14 @@ type WarpRoutingConfig struct {
 	TCPKeepAlive   *CustomDuration `yaml:"tcpKeepAlive" json:"tcpKeepAlive,omitempty"`
 }
 
-type configFileSettings struct {
-	Configuration `yaml:",inline"`
-	// older settings will be aggregated into the generic map, should be read via cli.Context
-	Settings map[string]interface{} `yaml:",inline"`
-}
-
 func (c *Configuration) Source() string {
-	return c.sourceFile
+	return ""
 }
 
-func (c *configFileSettings) Int(name string) (int, error) {
-	if raw, ok := c.Settings[name]; ok {
-		if v, ok := raw.(int); ok {
-			return v, nil
-		}
-		return 0, fmt.Errorf("expected int found %T for %s", raw, name)
-	}
-	return 0, nil
-}
-
-func (c *configFileSettings) Duration(name string) (time.Duration, error) {
-	if raw, ok := c.Settings[name]; ok {
-		switch v := raw.(type) {
-		case time.Duration:
-			return v, nil
-		case string:
-			return time.ParseDuration(v)
-		}
-		return 0, fmt.Errorf("expected duration found %T for %s", raw, name)
-	}
-	return 0, nil
-}
-
-func (c *configFileSettings) Float64(name string) (float64, error) {
-	if raw, ok := c.Settings[name]; ok {
-		if v, ok := raw.(float64); ok {
-			return v, nil
-		}
-		return 0, fmt.Errorf("expected float found %T for %s", raw, name)
-	}
-	return 0, nil
-}
-
-func (c *configFileSettings) String(name string) (string, error) {
-	if raw, ok := c.Settings[name]; ok {
-		if v, ok := raw.(string); ok {
-			return v, nil
-		}
-		return "", fmt.Errorf("expected string found %T for %s", raw, name)
-	}
-	return "", nil
-}
-
-func (c *configFileSettings) StringSlice(name string) ([]string, error) {
-	if raw, ok := c.Settings[name]; ok {
-		if slice, ok := raw.([]interface{}); ok {
-			strSlice := make([]string, len(slice))
-			for i, v := range slice {
-				str, ok := v.(string)
-				if !ok {
-					return nil, fmt.Errorf("expected string, found %T for %v", i, v)
-				}
-				strSlice[i] = str
-			}
-			return strSlice, nil
-		}
-		return nil, fmt.Errorf("expected string slice found %T for %s", raw, name)
-	}
-	return nil, nil
-}
-
-func (c *configFileSettings) IntSlice(name string) ([]int, error) {
-	if raw, ok := c.Settings[name]; ok {
-		if slice, ok := raw.([]interface{}); ok {
-			intSlice := make([]int, len(slice))
-			for i, v := range slice {
-				str, ok := v.(int)
-				if !ok {
-					return nil, fmt.Errorf("expected int, found %T for %v ", v, v)
-				}
-				intSlice[i] = str
-			}
-			return intSlice, nil
-		}
-		if v, ok := raw.([]int); ok {
-			return v, nil
-		}
-		return nil, fmt.Errorf("expected int slice found %T for %s", raw, name)
-	}
-	return nil, nil
-}
-
-func (c *configFileSettings) Generic(name string) (cli.Generic, error) {
-	return nil, errors.New("option type Generic not supported")
-}
-
-func (c *configFileSettings) Bool(name string) (bool, error) {
-	if raw, ok := c.Settings[name]; ok {
-		if v, ok := raw.(bool); ok {
-			return v, nil
-		}
-		return false, fmt.Errorf("expected boolean found %T for %s", raw, name)
-	}
-	return false, nil
-}
-
-var configuration configFileSettings
+var configuration Configuration
 
 func GetConfiguration() *Configuration {
-	return &configuration.Configuration
-}
-
-// ReadConfigFile returns InputSourceContext initialized from the configuration file.
-// On repeat calls returns with the same file, returns without reading the file again; however,
-// if value of "config" flag changes, will read the new config file
-func ReadConfigFile(c *cli.Context, log *zerolog.Logger) (settings *configFileSettings, warnings string, err error) {
-	configFile := c.String("config")
-	if configuration.Source() == configFile || configFile == "" {
-		if configuration.Source() == "" {
-			return nil, "", ErrNoConfigFile
-		}
-		return &configuration, "", nil
-	}
-
-	log.Debug().Msgf("Loading configuration from %s", configFile)
-	file, err := os.Open(configFile)
-	if err != nil {
-		// If does not exist and config file was not specificly specified then return ErrNoConfigFile found.
-		if os.IsNotExist(err) && !c.IsSet("config") {
-			err = ErrNoConfigFile
-		}
-		return nil, "", err
-	}
-	defer file.Close()
-	if err := yaml.NewDecoder(file).Decode(&configuration); err != nil {
-		if err == io.EOF {
-			log.Error().Msgf("Configuration file %s was empty", configFile)
-			return &configuration, "", nil
-		}
-		return nil, "", errors.Wrap(err, "error parsing YAML in config file at "+configFile)
-	}
-	configuration.sourceFile = configFile
-
-	// Parse it again, with strict mode, to find warnings.
-	if file, err := os.Open(configFile); err == nil {
-		decoder := yaml.NewDecoder(file)
-		decoder.KnownFields(true)
-		var unusedConfig configFileSettings
-		if err := decoder.Decode(&unusedConfig); err != nil {
-			warnings = err.Error()
-		}
-	}
-
-	return &configuration, warnings, nil
+	return &configuration
 }
 
 // A CustomDuration is a Duration that has custom serialization for JSON.

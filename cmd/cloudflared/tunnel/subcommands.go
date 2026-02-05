@@ -12,11 +12,6 @@ const (
 )
 
 var (
-	tunnelTokenFlag = altsrc.NewStringFlag(&cli.StringFlag{
-		Name:    TunnelTokenFlag,
-		Usage:   "The Tunnel token.",
-		EnvVars: []string{"TUNNEL_TOKEN"},
-	})
 	selectProtocolFlag = altsrc.NewStringFlag(&cli.StringFlag{
 		Name:    "protocol",
 		Value:   connection.AutoSelectFlag,
@@ -32,4 +27,3 @@ var (
 		EnvVars: []string{"TUNNEL_POST_QUANTUM"},
 	})
 )
-

@@ -169,9 +169,6 @@ func originRequestFromSingleRule(c *cli.Context) OriginRequestConfig {
 	if flag := NoChunkedEncodingFlag; c.IsSet(flag) {
 		disableChunkedEncoding = c.Bool(flag)
 	}
-	if flag := config.BastionFlag; c.IsSet(flag) {
-		bastionMode = c.Bool(flag)
-	}
 	if flag := ProxyAddressFlag; c.IsSet(flag) {
 		proxyAddress = c.String(flag)
 	}

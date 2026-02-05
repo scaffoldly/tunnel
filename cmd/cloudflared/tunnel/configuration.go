@@ -13,7 +13,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/urfave/cli/v2"
-	"github.com/urfave/cli/v2/altsrc"
 	"golang.org/x/term"
 
 	"github.com/cloudflare/cloudflared/client"
@@ -38,8 +37,6 @@ const (
 )
 
 var (
-	secretFlags = [1]*altsrc.StringFlag{tunnelTokenFlag}
-
 	configFlags = []string{
 		flags.Protocol,
 		flags.LogLevel,
@@ -81,22 +78,12 @@ func logClientOptions(c *cli.Context, log *zerolog.Logger) {
 }
 
 func isSecretFlag(key string) bool {
-	for _, flag := range secretFlags {
-		if flag.Name == key {
-			return true
-		}
-	}
+	// No secret flags in quick tunnel mode
 	return false
 }
 
 func isSecretEnvVar(key string) bool {
-	for _, flag := range secretFlags {
-		for _, secretEnvVar := range flag.EnvVars {
-			if secretEnvVar == key {
-				return true
-			}
-		}
-	}
+	// No secret env vars in quick tunnel mode
 	return false
 }
 

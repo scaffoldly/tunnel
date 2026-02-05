@@ -22,12 +22,6 @@ const (
 	// TransportLogLevel is the command line flag for the transport logging level
 	TransportLogLevel = "transport-loglevel"
 
-	// LogFile is the command line flag to define the file where application logs will be stored
-	LogFile = "logfile"
-
-	// LogDirectory is the command line flag to define the directory where application logs will be stored
-	LogDirectory = "log-directory"
-
 	// LogFormatOutput allows the command line logs to be output as JSON
 	LogFormatOutput             = "output"
 	LogFormatOutputValueDefault = "default"

@@ -14,5 +14,17 @@ func ConfigureLoggingFlags(shouldHide bool) []cli.Flag {
 			Usage:  "Application logging level {debug, info, warn, error, fatal}.",
 			Hidden: shouldHide,
 		},
+		&cli.StringFlag{
+			Name:   flags.TransportLogLevel,
+			Value:  "info",
+			Usage:  "Transport logging level {debug, info, warn, error, fatal}.",
+			Hidden: true,
+		},
+		&cli.StringFlag{
+			Name:   flags.LogFormatOutput,
+			Value:  flags.LogFormatOutputValueDefault,
+			Usage:  "Log output format {default, json}.",
+			Hidden: shouldHide,
+		},
 	}
 }

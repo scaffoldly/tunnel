@@ -105,8 +105,7 @@ func ParseIngressFromConfigAndCLI(conf *config.Configuration, c *cli.Context, lo
 		return Ingress{}, err
 	}
 	// Attempt to parse ingress rules from CLI:
-	//   --url or --unix-socket flag for a tunnel HTTP ingress
-	//   --bastion for ssh bastion service
+	//   --url flag for a tunnel HTTP ingress
 	ingressRules, err = parseCLIIngress(c, false)
 	if errors.Is(err, ErrNoIngressRulesCLI) {
 		// If no token is provided, the probability of NOT being a remotely managed tunnel is higher.
@@ -125,7 +124,7 @@ func ParseIngressFromConfigAndCLI(conf *config.Configuration, c *cli.Context, lo
 }
 
 // parseCLIIngress constructs an Ingress set with only one rule constructed from
-// CLI parameters: --url, --bastion, or --unix-socket
+// CLI parameter: --url
 func parseCLIIngress(c *cli.Context, allowURLFromArgs bool) (Ingress, error) {
 	service, err := parseSingleOriginService(c, allowURLFromArgs)
 	if err != nil {
@@ -160,9 +159,6 @@ func newDefaultOrigin(c *cli.Context, log *zerolog.Logger) Ingress {
 
 // Get a single origin service from the CLI/config.
 func parseSingleOriginService(c *cli.Context, allowURLFromArgs bool) (OriginService, error) {
-	if c.IsSet(config.BastionFlag) {
-		return newBastionService(), nil
-	}
 	if c.IsSet("url") || c.String("url") != "" {
 		originURL, err := config.ValidateUrl(c, allowURLFromArgs)
 		if err != nil {
@@ -174,13 +170,6 @@ func parseSingleOriginService(c *cli.Context, allowURLFromArgs bool) (OriginServ
 			}, nil
 		}
 		return newTCPOverWSService(originURL), nil
-	}
-	if c.IsSet("unix-socket") {
-		path, err := config.ValidateUnixSocket(c)
-		if err != nil {
-			return nil, errors.Wrap(err, "Error validating --unix-socket")
-		}
-		return &unixSocketPath{path: path, scheme: "http"}, nil
 	}
 	return nil, ErrNoIngressRulesCLI
 }
