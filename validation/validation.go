@@ -1,16 +1,12 @@
 package validation
 
 import (
-	"context"
 	"fmt"
 	"net"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
-	"github.com/coreos/go-oidc/v3/oidc"
-	"github.com/pkg/errors"
 	"golang.org/x/net/idna"
 )
 
@@ -168,49 +164,3 @@ func validateIP(scheme, host, port string) (string, error) {
 	return fmt.Sprintf("%s://%s", scheme, host), nil
 }
 
-// Access checks if a JWT from Cloudflare Access is valid.
-type Access struct {
-	verifier *oidc.IDTokenVerifier
-}
-
-func NewAccessValidator(ctx context.Context, domain, issuer, applicationAUD string) (*Access, error) {
-	domainURL, err := validateUrlString(domain)
-	if err != nil {
-		return nil, err
-	}
-
-	issuerURL, err := validateUrlString(issuer)
-	if err != nil {
-		return nil, err
-	}
-
-	// An issuerURL from Cloudflare Access will always use HTTPS.
-	issuerURL = strings.Replace(issuerURL, "http:", "https:", 1)
-
-	keySet := oidc.NewRemoteKeySet(ctx, domainURL+accessCertPath)
-	return &Access{oidc.NewVerifier(issuerURL, keySet, &oidc.Config{ClientID: applicationAUD})}, nil
-}
-
-func (a *Access) Validate(ctx context.Context, jwt string) error {
-	token, err := a.verifier.Verify(ctx, jwt)
-
-	if err != nil {
-		return errors.Wrapf(err, "token is invalid: %s", jwt)
-	}
-
-	// Perform extra sanity checks, just to be safe.
-
-	if token == nil {
-		return fmt.Errorf("token is nil: %s", jwt)
-	}
-
-	if !strings.HasSuffix(token.Issuer, accessDomain) {
-		return fmt.Errorf("token has non-cloudflare issuer of %s: %s", token.Issuer, jwt)
-	}
-
-	return nil
-}
-
-func (a *Access) ValidateRequest(ctx context.Context, r *http.Request) error {
-	return a.Validate(ctx, r.Header.Get(accessJwtHeader))
-}

@@ -9,29 +9,6 @@ import (
 	"golang.org/x/net/icmp"
 )
 
-func FindProtocol(p []byte) (layers.IPProtocol, error) {
-	version, err := FindIPVersion(p)
-	if err != nil {
-		return 0, err
-	}
-	switch version {
-	case 4:
-		if len(p) < ipv4MinHeaderLen {
-			return 0, fmt.Errorf("IPv4 packet should have at least %d bytes, got %d bytes", ipv4MinHeaderLen, len(p))
-		}
-		// Protocol is in the 10th byte of IPv4 header
-		return layers.IPProtocol(p[9]), nil
-	case 6:
-		if len(p) < ipv6HeaderLen {
-			return 0, fmt.Errorf("IPv6 packet should have at least %d bytes, got %d bytes", ipv6HeaderLen, len(p))
-		}
-		// Next header is in the 7th byte of IPv6 header
-		return layers.IPProtocol(p[6]), nil
-	default:
-		return 0, fmt.Errorf("unknow ip version %d", version)
-	}
-}
-
 func FindIPVersion(p []byte) (uint8, error) {
 	if len(p) == 0 {
 		return 0, fmt.Errorf("packet length is 0")

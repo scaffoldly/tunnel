@@ -4,14 +4,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"net/http"
-
-	"github.com/gorilla/websocket"
 )
-
-// IsWebSocketUpgrade checks to see if the request is a WebSocket connection.
-func IsWebSocketUpgrade(req *http.Request) bool {
-	return websocket.IsWebSocketUpgrade(req)
-}
 
 // NewResponseHeader returns headers needed to return to origin for completing handshake
 func NewResponseHeader(req *http.Request) http.Header {

@@ -93,19 +93,9 @@ type Identity struct {
 	identity string
 }
 
-// NewIdentity creates a new identity from a string
-func NewIdentity(s string) (Identity, error) {
-	return Identity{identity: s}, nil
-}
-
 // String returns the string representation
 func (i Identity) String() string {
 	return i.identity
-}
-
-// MarshalBinary serializes the identity
-func (i Identity) MarshalBinary() ([]byte, error) {
-	return []byte(i.identity), nil
 }
 
 // UnmarshalBinary deserializes the identity
