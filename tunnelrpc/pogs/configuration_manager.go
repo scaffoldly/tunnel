@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	capnp "zombiezen.com/go/capnproto2"
-	"zombiezen.com/go/capnproto2/rpc"
 	"zombiezen.com/go/capnproto2/server"
 
 	"github.com/cloudflare/cloudflared/tunnelrpc/metrics"
@@ -19,10 +17,6 @@ type ConfigurationManager interface {
 
 type ConfigurationManager_PogsImpl struct {
 	impl ConfigurationManager
-}
-
-func ConfigurationManager_ServerToClient(c ConfigurationManager) proto.ConfigurationManager {
-	return proto.ConfigurationManager_ServerToClient(ConfigurationManager_PogsImpl{c})
 }
 
 func (i ConfigurationManager_PogsImpl) UpdateConfiguration(p proto.ConfigurationManager_updateConfiguration) error {
@@ -45,35 +39,6 @@ func (i ConfigurationManager_PogsImpl) updateConfiguration(p proto.Configuration
 
 	updateResp := i.impl.UpdateConfiguration(p.Ctx, version, config)
 	return updateResp.Marshal(result)
-}
-
-type ConfigurationManager_PogsClient struct {
-	Client capnp.Client
-	Conn   *rpc.Conn
-}
-
-func (c ConfigurationManager_PogsClient) Close() error {
-	c.Client.Close()
-	return c.Conn.Close()
-}
-
-func (c ConfigurationManager_PogsClient) UpdateConfiguration(ctx context.Context, version int32, config []byte) (*UpdateConfigurationResponse, error) {
-	client := proto.ConfigurationManager{Client: c.Client}
-	promise := client.UpdateConfiguration(ctx, func(p proto.ConfigurationManager_updateConfiguration_Params) error {
-		p.SetVersion(version)
-		return p.SetConfig(config)
-	})
-	result, err := promise.Result().Struct()
-	if err != nil {
-		return nil, wrapRPCError(err)
-	}
-	response := new(UpdateConfigurationResponse)
-
-	err = response.Unmarshal(result)
-	if err != nil {
-		return nil, err
-	}
-	return response, nil
 }
 
 type UpdateConfigurationResponse struct {

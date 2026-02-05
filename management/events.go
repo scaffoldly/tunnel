@@ -219,40 +219,6 @@ func IntoClientEvent[T EventStartStreaming | EventStopStreaming](e *ClientEvent,
 	return event, true
 }
 
-// IntoServerEvent unmarshals the provided ServerEvent into the proper type.
-func IntoServerEvent[T EventLog](e *ServerEvent, eventType ServerEventType) (*T, bool) {
-	if e.Type != eventType {
-		return nil, false
-	}
-	event := new(T)
-	err := json.Unmarshal(e.event, event)
-	if err != nil {
-		return nil, false
-	}
-	return event, true
-}
-
-// ReadEvent will read a message from the websocket connection and parse it into a valid ServerEvent.
-func ReadServerEvent(c *websocket.Conn, ctx context.Context) (*ServerEvent, error) {
-	message, err := readMessage(c, ctx)
-	if err != nil {
-		return nil, err
-	}
-	event := ServerEvent{}
-	if err := json.Unmarshal(message, &event); err != nil {
-		return nil, err
-	}
-	switch event.Type {
-	case Logs:
-		event.event = message
-		return &event, nil
-	case UnknownServerEventType:
-		return nil, errInvalidMessageType
-	default:
-		return nil, fmt.Errorf("invalid server message type was provided: %s", event.Type)
-	}
-}
-
 // ReadEvent will read a message from the websocket connection and parse it into a valid ClientEvent.
 func ReadClientEvent(c *websocket.Conn, ctx context.Context) (*ClientEvent, error) {
 	message, err := readMessage(c, ctx)
@@ -306,12 +272,4 @@ func IsClosed(err error, log *zerolog.Logger) bool {
 		return true
 	}
 	return false
-}
-
-func AsClosed(err error) *websocket.CloseError {
-	var closeErr websocket.CloseError
-	if errors.As(err, &closeErr) {
-		return &closeErr
-	}
-	return nil
 }

@@ -10,9 +10,7 @@ import (
 	capnp "zombiezen.com/go/capnproto2"
 	"zombiezen.com/go/capnproto2/pogs"
 	"zombiezen.com/go/capnproto2/rpc"
-	"zombiezen.com/go/capnproto2/server"
 
-	"github.com/cloudflare/cloudflared/tunnelrpc/metrics"
 	"github.com/cloudflare/cloudflared/tunnelrpc/proto"
 )
 
@@ -25,94 +23,6 @@ type RegistrationServer interface {
 	// UpdateLocalConfiguration is the call typically handled by the edge for cloudflared to provide the current
 	// configuration it is operating with.
 	UpdateLocalConfiguration(ctx context.Context, config []byte) error
-}
-
-type RegistrationServer_PogsImpl struct {
-	impl RegistrationServer
-}
-
-func RegistrationServer_ServerToClient(s RegistrationServer) proto.RegistrationServer {
-	return proto.RegistrationServer_ServerToClient(RegistrationServer_PogsImpl{s})
-}
-
-func (i RegistrationServer_PogsImpl) RegisterConnection(p proto.RegistrationServer_registerConnection) error {
-	return metrics.ObserveServerHandler(func() error { return i.registerConnection(p) }, metrics.Registration, metrics.OperationRegisterConnection)
-}
-
-func (i RegistrationServer_PogsImpl) registerConnection(p proto.RegistrationServer_registerConnection) error {
-	server.Ack(p.Options)
-
-	auth, err := p.Params.Auth()
-	if err != nil {
-		return err
-	}
-	var pogsAuth TunnelAuth
-	err = pogsAuth.UnmarshalCapnproto(auth)
-	if err != nil {
-		return err
-	}
-	uuidBytes, err := p.Params.TunnelId()
-	if err != nil {
-		return err
-	}
-	tunnelID, err := uuid.FromBytes(uuidBytes)
-	if err != nil {
-		return err
-	}
-	connIndex := p.Params.ConnIndex()
-	options, err := p.Params.Options()
-	if err != nil {
-		return err
-	}
-	var pogsOptions ConnectionOptions
-	err = pogsOptions.UnmarshalCapnproto(options)
-	if err != nil {
-		return err
-	}
-
-	connDetails, callError := i.impl.RegisterConnection(p.Ctx, pogsAuth, tunnelID, connIndex, &pogsOptions)
-
-	resp, err := p.Results.NewResult()
-	if err != nil {
-		return err
-	}
-
-	if callError != nil {
-		if connError, err := resp.Result().NewError(); err != nil {
-			return err
-		} else {
-			return MarshalError(connError, callError)
-		}
-	}
-
-	if details, err := resp.Result().NewConnectionDetails(); err != nil {
-		return err
-	} else {
-		return connDetails.MarshalCapnproto(details)
-	}
-}
-
-func (i RegistrationServer_PogsImpl) UnregisterConnection(p proto.RegistrationServer_unregisterConnection) error {
-	return metrics.ObserveServerHandler(func() error {
-		server.Ack(p.Options)
-		i.impl.UnregisterConnection(p.Ctx)
-		return nil // No metrics will be reported for failure as this method has no return value
-	}, metrics.Registration, metrics.OperationUnregisterConnection)
-}
-
-func (i RegistrationServer_PogsImpl) UpdateLocalConfiguration(p proto.RegistrationServer_updateLocalConfiguration) error {
-	return metrics.ObserveServerHandler(func() error { return i.updateLocalConfiguration(p) }, metrics.Registration, metrics.OperationUpdateLocalConfiguration)
-}
-
-func (i RegistrationServer_PogsImpl) updateLocalConfiguration(c proto.RegistrationServer_updateLocalConfiguration) error {
-	server.Ack(c.Options)
-
-	configBytes, err := c.Params.Config()
-	if err != nil {
-		return err
-	}
-
-	return i.impl.UpdateLocalConfiguration(c.Ctx, configBytes)
 }
 
 type RegistrationServer_PogsClient struct {
@@ -297,16 +207,4 @@ func (details *ConnectionDetails) UnmarshalCapnproto(s proto.ConnectionDetails) 
 	details.TunnelIsRemotelyManaged = s.TunnelIsRemotelyManaged()
 
 	return err
-}
-
-func MarshalError(s proto.ConnectionError, err error) error {
-	if err := s.SetCause(err.Error()); err != nil {
-		return err
-	}
-	if retryableErr, ok := err.(*RetryableError); ok {
-		s.SetShouldRetry(true)
-		s.SetRetryAfter(int64(retryableErr.Delay))
-	}
-
-	return nil
 }

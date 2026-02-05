@@ -233,17 +233,6 @@ func (m *ManagementService) canStartStream(session *session) bool {
 	return true
 }
 
-// parseFilters will check the ClientEvent for start_streaming and assign filters if provided to the session
-func (m *ManagementService) parseFilters(c *websocket.Conn, event *ClientEvent, session *session) bool {
-	// Expect the first incoming request
-	startEvent, ok := IntoClientEvent[EventStartStreaming](event, StartStreaming)
-	if !ok {
-		return false
-	}
-	session.Filters(startEvent.Filters)
-	return true
-}
-
 // Management Streaming Logs accept handler
 func (m *ManagementService) logs(w http.ResponseWriter, r *http.Request) {
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{

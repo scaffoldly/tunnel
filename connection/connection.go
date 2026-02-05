@@ -2,7 +2,6 @@ package connection
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"math"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pkg/errors"
 
 	"github.com/cloudflare/cloudflared/tracing"
 	"github.com/cloudflare/cloudflared/tunnelrpc/pogs"
@@ -81,25 +79,6 @@ type TunnelToken struct {
 	TunnelSecret []byte    `json:"s"`
 	TunnelID     uuid.UUID `json:"t"`
 	Endpoint     string    `json:"e,omitempty"`
-}
-
-func (t TunnelToken) Credentials() Credentials {
-	// nolint: gosimple
-	return Credentials{
-		AccountTag:   t.AccountTag,
-		TunnelSecret: t.TunnelSecret,
-		TunnelID:     t.TunnelID,
-		Endpoint:     t.Endpoint,
-	}
-}
-
-func (t TunnelToken) Encode() (string, error) {
-	val, err := json.Marshal(t)
-	if err != nil {
-		return "", errors.Wrap(err, "could not JSON encode token")
-	}
-
-	return base64.StdEncoding.EncodeToString(val), nil
 }
 
 type ClassicTunnelProperties struct {

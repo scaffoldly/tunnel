@@ -332,48 +332,6 @@ func (s *UDPSessionRegistrationResponseDatagram) MarshalBinary() (data []byte, e
 	return data, nil
 }
 
-func (s *UDPSessionRegistrationResponseDatagram) UnmarshalBinary(data []byte) error {
-	datagramType, err := ParseDatagramType(data)
-	if err != nil {
-		return wrapUnmarshalErr(err)
-	}
-	if datagramType != UDPSessionRegistrationResponseType {
-		return wrapUnmarshalErr(ErrInvalidDatagramType)
-	}
-
-	if len(data) < datagramSessionRegistrationResponseLen {
-		return wrapUnmarshalErr(ErrDatagramResponseInvalidSize)
-	}
-
-	respType := SessionRegistrationResp(data[1])
-
-	requestID, err := RequestIDFromSlice(data[2:18])
-	if err != nil {
-		return wrapUnmarshalErr(err)
-	}
-
-	errMsgLen := binary.BigEndian.Uint16(data[18:20])
-	if errMsgLen > maxResponseErrorMessageLen {
-		return wrapUnmarshalErr(ErrDatagramResponseMsgTooLargeMaximum)
-	}
-
-	if len(data[20:]) < int(errMsgLen) {
-		return wrapUnmarshalErr(ErrDatagramResponseMsgTooLargeDatagram)
-	}
-
-	var errMsg string
-	if errMsgLen > 0 {
-		errMsg = string(data[20:])
-	}
-
-	*s = UDPSessionRegistrationResponseDatagram{
-		RequestID:    requestID,
-		ResponseType: respType,
-		ErrorMsg:     errMsg,
-	}
-	return nil
-}
-
 // ICMPDatagram is used to propagate ICMPv4 and ICMPv6 payloads.
 type ICMPDatagram struct {
 	Payload []byte

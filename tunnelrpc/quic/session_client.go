@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,20 +36,6 @@ func NewSessionClient(ctx context.Context, stream io.ReadWriteCloser, requestTim
 		transport:      transport,
 		requestTimeout: requestTimeout,
 	}, nil
-}
-
-func (c *SessionClient) RegisterUdpSession(ctx context.Context, sessionID uuid.UUID, dstIP net.IP, dstPort uint16, closeIdleAfterHint time.Duration, traceContext string) (*pogs.RegisterUdpSessionResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, c.requestTimeout)
-	defer cancel()
-	defer metrics.CapnpMetrics.ClientOperations.WithLabelValues(metrics.SessionManager, metrics.OperationRegisterUdpSession).Inc()
-	timer := metrics.NewClientOperationLatencyObserver(metrics.SessionManager, metrics.OperationRegisterUdpSession)
-	defer timer.ObserveDuration()
-
-	resp, err := c.client.RegisterUdpSession(ctx, sessionID, dstIP, dstPort, closeIdleAfterHint, traceContext)
-	if err != nil {
-		metrics.CapnpMetrics.ClientFailures.WithLabelValues(metrics.SessionManager, metrics.OperationRegisterUdpSession).Inc()
-	}
-	return resp, err
 }
 
 func (c *SessionClient) UnregisterUdpSession(ctx context.Context, sessionID uuid.UUID, message string) error {

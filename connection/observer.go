@@ -67,10 +67,6 @@ func (o *Observer) logConnected(connectionID uuid.UUID, connIndex uint8, locatio
 	o.metrics.registerServerLocation(uint8ToString(connIndex), location)
 }
 
-func (o *Observer) sendRegisteringEvent(connIndex uint8) {
-	o.sendEvent(Event{Index: connIndex, EventType: RegisteringTunnel})
-}
-
 func (o *Observer) sendConnectedEvent(connIndex uint8, protocol Protocol, location string, edgeAddress net.IP) {
 	o.sendEvent(Event{Index: connIndex, EventType: Connected, Protocol: protocol, Location: location, EdgeAddress: edgeAddress})
 }
@@ -119,10 +115,4 @@ func (o *Observer) dispatchEvents() {
 			}
 		}
 	}
-}
-
-type EventSinkFunc func(event Event)
-
-func (f EventSinkFunc) OnTunnelEvent(event Event) {
-	f(event)
 }
