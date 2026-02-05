@@ -216,7 +216,7 @@ func StartServer(
 		errC <- metrics.ServeMetrics(metricsListener, ctx, metricsConfig, log)
 	}()
 
-	reconnectCh := make(chan supervisor.ReconnectSignal, c.Int(cfdflags.HaConnections))
+	reconnectCh := make(chan supervisor.ReconnectSignal, 1) // Single connection for quick tunnels
 
 	wg.Add(1)
 	go func() {
@@ -288,40 +288,10 @@ func tunnelFlags(shouldHide bool) []cli.Flag {
 	flags = append(flags, configureProxyFlags(shouldHide)...)
 	flags = append(flags, cliutil.ConfigureLoggingFlags(shouldHide)...)
 	flags = append(flags, []cli.Flag{
-		// Internal flags needed for quick tunnel functionality
+		// Internal flag for quick tunnel service URL
 		&cli.StringFlag{
 			Name:   "quick-service",
 			Value:  "https://api.trycloudflare.com",
-			Hidden: true,
-		},
-		&cli.IntFlag{
-			Name:   cfdflags.HaConnections,
-			Value:  4,
-			Hidden: true,
-		},
-		&cli.DurationFlag{
-			Name:   cfdflags.GracePeriod,
-			Value:  time.Second * 30,
-			Hidden: true,
-		},
-		&cli.StringFlag{
-			Name:   cfdflags.EdgeIpVersion,
-			Value:  "auto",
-			Hidden: true,
-		},
-		&cli.DurationFlag{
-			Name:   cfdflags.RpcTimeout,
-			Value:  5 * time.Second,
-			Hidden: true,
-		},
-		&cli.IntFlag{
-			Name:   cfdflags.Retries,
-			Value:  5,
-			Hidden: true,
-		},
-		&cli.IntFlag{
-			Name:   cfdflags.MaxEdgeAddrRetries,
-			Value:  8,
 			Hidden: true,
 		},
 		selectProtocolFlag,

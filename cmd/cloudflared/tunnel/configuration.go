@@ -169,10 +169,6 @@ func prepareTunnelConfig(
 	if err != nil {
 		return nil, nil, err
 	}
-	edgeIPVersion, err := parseConfigIPVersion(c.String(flags.EdgeIpVersion))
-	if err != nil {
-		return nil, nil, err
-	}
 
 	// Use endpoint from credentials as region (for quick tunnels, this is typically empty)
 	resolvedRegion := namedTunnel.Credentials.Endpoint
@@ -190,24 +186,24 @@ func prepareTunnelConfig(
 	originDialerService.AddReservedService(dnsService, []netip.AddrPort{origins.VirtualDNSServiceAddr})
 
 	tunnelConfig := &supervisor.TunnelConfig{
-		ClientConfig:       clientConfig,
-		GracePeriod:        gracePeriod,
-		Region:             resolvedRegion,
-		EdgeIPVersion:      edgeIPVersion,
-		HAConnections:      c.Int(flags.HaConnections),
-		Tags:               tags,
-		Log:                log,
-		LogTransport:       logTransport,
-		Observer:           observer,
-		ReportedVersion:    info.Version(),
-		Retries:            uint(c.Int(flags.Retries)), // nolint: gosec
-		RunFromTerminal:    isRunningFromTerminal(),
-		NamedTunnel:        namedTunnel,
-		ProtocolSelector:   protocolSelector,
-		EdgeTLSConfigs:     edgeTLSConfigs,
-		MaxEdgeAddrRetries: uint8(c.Int(flags.MaxEdgeAddrRetries)), // nolint: gosec
-		RPCTimeout:         c.Duration(flags.RpcTimeout),
-		OriginDNSService:   dnsService,
+		ClientConfig:        clientConfig,
+		GracePeriod:         gracePeriod,
+		Region:              resolvedRegion,
+		EdgeIPVersion:       allregions.Auto,
+		HAConnections:       1, // Quick tunnels use single connection
+		Tags:                tags,
+		Log:                 log,
+		LogTransport:        logTransport,
+		Observer:            observer,
+		ReportedVersion:     info.Version(),
+		Retries:             5,
+		RunFromTerminal:     isRunningFromTerminal(),
+		NamedTunnel:         namedTunnel,
+		ProtocolSelector:    protocolSelector,
+		EdgeTLSConfigs:      edgeTLSConfigs,
+		MaxEdgeAddrRetries:  8,
+		RPCTimeout:          5 * time.Second,
+		OriginDNSService:    dnsService,
 		OriginDialerService: originDialerService,
 	}
 	icmpRouter, err := newICMPRouter(c, log)
@@ -238,30 +234,11 @@ func parseConfigFlags(c *cli.Context) map[string]string {
 }
 
 func gracePeriod(c *cli.Context) (time.Duration, error) {
-	period := c.Duration(flags.GracePeriod)
-	if period > connection.MaxGracePeriod {
-		return time.Duration(0), fmt.Errorf("%s must be equal or less than %v", flags.GracePeriod, connection.MaxGracePeriod)
-	}
-	return period, nil
+	return 30 * time.Second, nil
 }
 
 func isRunningFromTerminal() bool {
 	return term.IsTerminal(int(os.Stdout.Fd()))
-}
-
-// ParseConfigIPVersion returns the IP version from possible expected values from config
-func parseConfigIPVersion(version string) (v allregions.ConfigIPVersion, err error) {
-	switch version {
-	case "4":
-		v = allregions.IPv4Only
-	case "6":
-		v = allregions.IPv6Only
-	case "auto":
-		v = allregions.Auto
-	default: // unspecified or invalid
-		err = fmt.Errorf("invalid value for edge-ip-version: %s", version)
-	}
-	return
 }
 
 func newICMPRouter(c *cli.Context, logger *zerolog.Logger) (ingress.ICMPRouterServer, error) {

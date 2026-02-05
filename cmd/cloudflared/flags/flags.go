@@ -1,12 +1,6 @@
 package flags
 
 const (
-	// HaConnections specifies how many connections to make to the edge
-	HaConnections = "ha-connections"
-
-	// RpcTimeout is how long to wait for a Capnp RPC request to the edge
-	RpcTimeout = "rpc-timeout"
-
 	// MaxActiveFlows is the command line flag to set the maximum number of flows that cloudflared can be processing at the same time
 	MaxActiveFlows = "max-active-flows"
 
@@ -15,21 +9,6 @@ const (
 
 	// PostQuantum is the command line flag to force the connection to Cloudflare Edge to use Post Quantum cryptography
 	PostQuantum = "post-quantum"
-
-	// EdgeIpVersion is the command line flag to set the Cloudflare Edge IP address version to connect with
-	EdgeIpVersion = "edge-ip-version"
-
-	// Edge is the command line flag to set the address of the Cloudflare tunnel server
-	Edge = "edge"
-
-	// Retries is the command line flag to set the maximum number of retries for connection/protocol errors
-	Retries = "retries"
-
-	// MaxEdgeAddrRetries is the command line flag to set the maximum number of times to retry on edge addrs before falling back to a lower protocol
-	MaxEdgeAddrRetries = "max-edge-addr-retries"
-
-	// GracePeriod is the command line flag to set the maximum amount of time that cloudflared waits to shut down if it is still serving requests
-	GracePeriod = "grace-period"
 
 	// ICMPV4Src is the command line flag to set the source address and the interface name to send/receive ICMPv4 messages
 	ICMPV4Src = "icmpv4-src"
