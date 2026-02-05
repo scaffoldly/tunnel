@@ -136,10 +136,6 @@ func CreateLoggerFromContext(c *cli.Context, disableTerminal bool) *zerolog.Logg
 	return createFromContext(c, cfdflags.LogLevel, cfdflags.LogDirectory, disableTerminal)
 }
 
-func CreateSSHLoggerFromContext(c *cli.Context, disableTerminal bool) *zerolog.Logger {
-	return createFromContext(c, cfdflags.LogLevelSSH, cfdflags.LogDirectory, disableTerminal)
-}
-
 func createFromContext(
 	c *cli.Context,
 	logLevelFlagName,
@@ -175,17 +171,6 @@ func createFromContext(
 	return log
 }
 
-func Create(loggerConfig *Config) *zerolog.Logger {
-	if loggerConfig == nil {
-		loggerConfig = &Config{
-			defaultConfig.ConsoleConfig,
-			nil,
-			nil,
-			defaultConfig.MinLevel,
-		}
-	}
-	return newZerolog(loggerConfig)
-}
 
 func createConsoleLogger(config ConsoleConfig) io.Writer {
 	if config.asJSON {
