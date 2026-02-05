@@ -266,7 +266,6 @@ func tunnelFlags(shouldHide bool) []cli.Flag {
 			Hidden: true,
 		},
 		selectProtocolFlag,
-		postQuantumFlag,
 	}...)
 	return flags
 }

@@ -96,8 +96,7 @@ func prepareTunnelConfig(
 	namedTunnel *connection.TunnelProperties,
 ) (*supervisor.TunnelConfig, *orchestration.Config, error) {
 	transportProtocol := c.String(flags.Protocol)
-	isPostQuantumEnforced := c.Bool(flags.PostQuantum)
-	featureSelector, err := features.NewFeatureSelector(ctx, namedTunnel.Credentials.AccountTag, nil, isPostQuantumEnforced, log)
+	featureSelector, err := features.NewFeatureSelector(ctx, namedTunnel.Credentials.AccountTag, nil, false, log)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "Failed to create feature selector")
 	}
@@ -112,23 +111,13 @@ func prepareTunnelConfig(
 	// Tags: only add connector ID tag
 	tags := []pogs.Tag{{Name: "ID", Value: clientConfig.ConnectorID.String()}}
 
-	clientFeatures := featureSelector.Snapshot()
-	pqMode := clientFeatures.PostQuantum
-	if pqMode == features.PostQuantumStrict {
-		// Error if the user tries to force a non-quic transport protocol
-		if transportProtocol != connection.AutoSelectFlag && transportProtocol != connection.QUIC.String() {
-			return nil, nil, fmt.Errorf("post-quantum is only supported with the quic transport")
-		}
-		transportProtocol = connection.QUIC.String()
-	}
-
 	cfg := config.GetConfiguration()
 	ingressRules, err := ingress.ParseIngressFromConfigAndCLI(cfg, c, log)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	protocolSelector, err := connection.NewProtocolSelector(transportProtocol, namedTunnel.Credentials.AccountTag, c.IsSet(TunnelTokenFlag), isPostQuantumEnforced, edgediscovery.ProtocolPercentage, connection.ResolveTTL, log)
+	protocolSelector, err := connection.NewProtocolSelector(transportProtocol, namedTunnel.Credentials.AccountTag, c.IsSet(TunnelTokenFlag), false, edgediscovery.ProtocolPercentage, connection.ResolveTTL, log)
 	if err != nil {
 		return nil, nil, err
 	}

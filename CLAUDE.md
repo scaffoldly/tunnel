@@ -48,10 +48,7 @@ CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o cloudflared ./cmd/cloudflar
 ### Simplified Flags
 Only CLI flags that work:
 - `--url` - Local service URL to tunnel (required)
-- `--protocol` - Transport protocol (default: quic)
-- `--post-quantum` / `--pq` - Enable post-quantum crypto
 - `--loglevel` - Log level (debug, info, warn, error, fatal)
-- `--output` - Log format (default, json)
 
 ## Key Files Modified
 - `cmd/cloudflared/tunnel/cmd.go` - Main tunnel command

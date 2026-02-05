@@ -108,18 +108,11 @@ func createFromContext(
 	disableTerminal bool,
 ) *zerolog.Logger {
 	logLevel := c.String(logLevelFlagName)
-	var logFormatJSON bool
-	switch c.String(cfdflags.LogFormatOutput) {
-	case cfdflags.LogFormatOutputValueJSON:
-		logFormatJSON = true
-	default:
-		logFormatJSON = false
-	}
 
 	loggerConfig := CreateConfig(
 		logLevel,
 		disableTerminal,
-		logFormatJSON,
+		false, // no JSON format
 		"", "", // no file logging
 	)
 

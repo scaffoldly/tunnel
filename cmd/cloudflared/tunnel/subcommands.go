@@ -20,10 +20,4 @@ var (
 		EnvVars: []string{"TUNNEL_TRANSPORT_PROTOCOL"},
 		Hidden:  true,
 	})
-	postQuantumFlag = altsrc.NewBoolFlag(&cli.BoolFlag{
-		Name:    "post-quantum",
-		Usage:   "When given creates an experimental post-quantum secure tunnel",
-		Aliases: []string{"pq"},
-		EnvVars: []string{"TUNNEL_POST_QUANTUM"},
-	})
 )
