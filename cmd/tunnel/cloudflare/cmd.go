@@ -1,4 +1,4 @@
-package tunnel
+package cloudflare
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"github.com/urfave/cli/v2/altsrc"
 
-	"github.com/cloudflare/cloudflared/cmd/cloudflared/cliutil"
+	"github.com/cloudflare/cloudflared/cmd/tunnel/cliutil"
 	"github.com/cloudflare/cloudflared/config"
 	"github.com/cloudflare/cloudflared/connection"
 	"github.com/cloudflare/cloudflared/credentials"
@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	tunnelCmdErrorMessage = `Missing --url flag. Usage: cloudflared tunnel --url http://localhost:8080`
+	tunnelCmdErrorMessage = `Missing --url flag. Usage: tunnel cloudflare --url http://localhost:8080`
 )
 
 var (
@@ -46,18 +46,18 @@ func Commands() []*cli.Command {
 
 func buildTunnelCommand(subcommands []*cli.Command) *cli.Command {
 	return &cli.Command{
-		Name:      "tunnel",
+		Name:      "cloudflare",
 		Action:    cliutil.ConfiguredAction(TunnelCommand),
 		Category:  "Tunnel",
-		Usage:     "Create a quick tunnel to expose a local service",
+		Usage:     "Create a quick Cloudflare tunnel to expose a local service",
 		ArgsUsage: " ",
 		Description: `Creates an ephemeral tunnel to expose a local HTTP service to the internet.
 
 Example:
-    $ cloudflared tunnel --url http://localhost:8080
+    $ tunnel cloudflare --url http://localhost:8080
 
 The tunnel URL is printed to stdout (logs go to stderr), enabling:
-    $ cloudflared tunnel --url http://localhost:8080 > ~/tunnel-url`,
+    $ tunnel cloudflare --url http://localhost:8080 > ~/tunnel-url`,
 		Subcommands: subcommands,
 		Flags:       tunnelFlags(false),
 	}

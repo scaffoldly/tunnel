@@ -10,7 +10,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/term"
 
-	cfdflags "github.com/cloudflare/cloudflared/cmd/cloudflared/flags"
+	cfdflags "github.com/cloudflare/cloudflared/cmd/tunnel/flags"
 	"github.com/cloudflare/cloudflared/management"
 )
 

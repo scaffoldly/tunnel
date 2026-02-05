@@ -1,4 +1,4 @@
-package tunnel
+package cloudflare
 
 import (
 	"context"
@@ -16,8 +16,8 @@ import (
 	"golang.org/x/term"
 
 	"github.com/cloudflare/cloudflared/client"
-	"github.com/cloudflare/cloudflared/cmd/cloudflared/cliutil"
-	"github.com/cloudflare/cloudflared/cmd/cloudflared/flags"
+	"github.com/cloudflare/cloudflared/cmd/tunnel/cliutil"
+	"github.com/cloudflare/cloudflared/cmd/tunnel/flags"
 	"github.com/cloudflare/cloudflared/config"
 	"github.com/cloudflare/cloudflared/connection"
 	"github.com/cloudflare/cloudflared/edgediscovery"

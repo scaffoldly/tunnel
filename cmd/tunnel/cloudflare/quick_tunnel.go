@@ -1,4 +1,4 @@
-package tunnel
+package cloudflare
 
 import (
 	"encoding/json"
@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 
-	"github.com/cloudflare/cloudflared/cmd/cloudflared/flags"
+	"github.com/cloudflare/cloudflared/cmd/tunnel/flags"
 	"github.com/cloudflare/cloudflared/connection"
 )
 

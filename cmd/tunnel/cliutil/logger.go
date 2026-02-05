@@ -3,7 +3,7 @@ package cliutil
 import (
 	"github.com/urfave/cli/v2"
 
-	"github.com/cloudflare/cloudflared/cmd/cloudflared/flags"
+	"github.com/cloudflare/cloudflared/cmd/tunnel/flags"
 )
 
 func ConfigureLoggingFlags(shouldHide bool) []cli.Flag {

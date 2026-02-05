@@ -8,8 +8,8 @@ import (
 	"github.com/urfave/cli/v2"
 	"go.uber.org/automaxprocs/maxprocs"
 
-	"github.com/cloudflare/cloudflared/cmd/cloudflared/cliutil"
-	"github.com/cloudflare/cloudflared/cmd/cloudflared/tunnel"
+	"github.com/cloudflare/cloudflared/cmd/tunnel/cliutil"
+	"github.com/cloudflare/cloudflared/cmd/tunnel/cloudflare"
 )
 
 const (
@@ -39,18 +39,18 @@ func main() {
 	}
 
 	app := &cli.App{}
-	app.Name = "cloudflared"
-	app.Usage = "Create quick tunnels to expose local services"
-	app.UsageText = "cloudflared tunnel --url <URL>"
+	app.Name = "tunnel"
+	app.Usage = "Create quick Cloudflare tunnels to expose local services"
+	app.UsageText = "tunnel cloudflare --url <URL>"
 	app.Version = fmt.Sprintf("%s (built %s%s)", Version, BuildTime, bInfo.GetBuildTypeMsg())
 	app.Description = `Expose a local HTTP service to the internet via Cloudflare's network.
 
-Example: cloudflared tunnel --url http://localhost:8080`
+Example: tunnel cloudflare --url http://localhost:8080`
 	app.Flags = flags()
 	app.Action = action(graceShutdownC)
 	app.Commands = commands(cli.ShowVersion)
 
-	tunnel.Init(bInfo, graceShutdownC) // we need this to support the tunnel sub command...
+	cloudflare.Init(bInfo, graceShutdownC) // we need this to support the cloudflare sub command...
 	runApp(app, graceShutdownC)
 }
 
@@ -77,12 +77,12 @@ func commands(version func(c *cli.Context)) []*cli.Command {
 			},
 		},
 	}
-	cmds = append(cmds, tunnel.Commands()...)
+	cmds = append(cmds, cloudflare.Commands()...)
 	return cmds
 }
 
 func flags() []cli.Flag {
-	return tunnel.Flags()
+	return cloudflare.Flags()
 }
 
 func isEmptyInvocation(c *cli.Context) bool {
@@ -94,11 +94,11 @@ func action(graceShutdownC chan struct{}) cli.ActionFunc {
 		if isEmptyInvocation(c) {
 			return handleServiceMode(c, graceShutdownC)
 		}
-		return tunnel.TunnelCommand(c)
+		return cloudflare.TunnelCommand(c)
 	})
 }
 
-// cloudflared was started without any flags
+// tunnel was started without any flags
 func handleServiceMode(c *cli.Context, shutdownC chan struct{}) error {
-	return fmt.Errorf("no command specified - use 'cloudflared tunnel --url <URL>' for quick tunnels")
+	return fmt.Errorf("missing --url flag. Usage: tunnel cloudflare --url http://localhost:8080")
 }

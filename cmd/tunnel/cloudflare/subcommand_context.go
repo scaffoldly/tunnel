@@ -1,4 +1,4 @@
-package tunnel
+package cloudflare
 
 import (
 	"github.com/rs/zerolog"

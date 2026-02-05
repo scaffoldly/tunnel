@@ -11,7 +11,7 @@ import (
 	pkgerrors "github.com/pkg/errors"
 	"github.com/rs/zerolog"
 
-	"github.com/cloudflare/cloudflared/cmd/cloudflared/flags"
+	"github.com/cloudflare/cloudflared/cmd/tunnel/flags"
 	"github.com/cloudflare/cloudflared/config"
 	"github.com/cloudflare/cloudflared/connection"
 	cfdflow "github.com/cloudflare/cloudflared/flow"
