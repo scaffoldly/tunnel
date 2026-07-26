@@ -49,48 +49,56 @@ metadata:
   name: tunnel-controller
   labels:
     app.kubernetes.io/name: tunnel
+# Scoped to what the unimplemented stub actually calls today, and no wider. Each
+# rule below is here because some line of Go needs it; provisioning will need
+# more, and those rules land in the same commit as the code that calls them.
+# Nothing here is speculative — an unused grant is a standing offer to whoever
+# gets hold of this ServiceAccount.
 rules:
-  # --install creates the default classes. create is needed once; get and list let the
-  # controller recognise a class it already owns instead of erroring.
-  - apiGroups: ["networking.k8s.io"]
-    resources: ["ingressclasses"]
-    verbs: ["get", "list", "watch", "create"]
-  - apiGroups: ["gateway.networking.k8s.io"]
-    resources: ["gatewayclasses"]
-    verbs: ["get", "list", "watch", "create"]
-  - apiGroups: ["gateway.networking.k8s.io"]
-    resources: ["gatewayclasses/status"]
-    verbs: ["get", "patch", "update"]
-  # The workload resources themselves.
+  # Ingress controller: informer LIST/WATCH plus Reconcile's Get.
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
     verbs: ["get", "list", "watch"]
+  # Read to resolve spec.ingressClassName back to a controller and a provider
+  # annotation; create for --install, which mints the default class at startup.
+  # An existing class naming someone else is read and left alone, so no update.
   - apiGroups: ["networking.k8s.io"]
-    resources: ["ingresses/status"]
-    verbs: ["get", "patch", "update"]
+    resources: ["ingressclasses"]
+    verbs: ["get", "list", "watch", "create"]
+  # Gateway controller. Unused on clusters without the Gateway API CRDs: the
+  # controllers do not register there, and a rule naming an absent group is
+  # inert rather than an error.
   - apiGroups: ["gateway.networking.k8s.io"]
-    resources: ["gateways", "httproutes", "grpcroutes", "referencegrants"]
+    resources: ["gateways"]
     verbs: ["get", "list", "watch"]
+  # Same shape as ingressclasses: resolve the class, and create it on --install.
   - apiGroups: ["gateway.networking.k8s.io"]
-    resources: ["gateways/status", "httproutes/status", "grpcroutes/status"]
-    verbs: ["get", "patch", "update"]
-  # Backend resolution.
-  - apiGroups: [""]
-    resources: ["services", "namespaces"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["discovery.k8s.io"]
-    resources: ["endpointslices"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["create", "patch"]
+    resources: ["gatewayclasses"]
+    verbs: ["get", "list", "watch", "create"]
+  # The one status write in the tree. Gateway API requires the implementing
+  # controller to publish Accepted, so the class reports Accepted=False with
+  # reason Waiting until provisioning exists. Status().Update is a PUT on the
+  # subresource, hence update alone.
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gatewayclasses/status"]
+    verbs: ["update"]
+  # The "Unimplemented" event on a matching Ingress or Gateway. mgr.GetEventRecorder
+  # is the events.k8s.io/v1 client, which creates an event and patches it as the
+  # series repeats — it never touches the core "" events resource, so that group
+  # is deliberately absent. kubectl describe still shows these; the API server
+  # serves one store through both endpoints.
   - apiGroups: ["events.k8s.io"]
     resources: ["events"]
     verbs: ["create", "patch"]
-  # Leader election, so two replicas never provision the same tunnel twice.
-  - apiGroups: ["coordination.k8s.io"]
-    resources: ["leases"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # No coordination.k8s.io/leases: --leader-elect defaults to false and the
+  # Deployment below passes no args, so the manager never takes a lease. This
+  # rule must come back before replicas > 1 — two replicas both minting tunnels
+  # for one Ingress would leak a tunnel per reconcile. Leader election also
+  # emits its lock events through the older core client, so it needs
+  # ["" / events: create, patch] alongside the lease rule.
+  #
+  # No secrets, services, namespaces, endpointslices, or route types either:
+  # nothing reads them yet.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -107,36 +115,9 @@ subjects:
     name: tunnel-controller
     namespace: tunnel-system
 ---
-# Tunnel credentials are written as Secrets, scoped to the controller's own
-# namespace so this cannot rewrite Secrets elsewhere in the cluster.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: tunnel-controller
-  namespace: tunnel-system
-  labels:
-    app.kubernetes.io/name: tunnel
-rules:
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: tunnel-controller
-  namespace: tunnel-system
-  labels:
-    app.kubernetes.io/name: tunnel
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: tunnel-controller
-subjects:
-  - kind: ServiceAccount
-    name: tunnel-controller
-    namespace: tunnel-system
----
+# No namespaced Role: it existed only to write tunnel credentials as Secrets,
+# and nothing writes a Secret yet. It returns, scoped to tunnel-system, with the
+# code that stores a credential.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
