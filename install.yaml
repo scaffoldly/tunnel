@@ -1,0 +1,197 @@
+# tunnel — cluster install
+#
+#   kubectl apply -f https://tunnel.pizza
+#
+# tunnel.pizza redirects kubectl here, so this file and the controller it
+# installs version together. spec.controller must equal the controller's Go
+# import path, and keeping both in one repo means a package rename can no
+# longer invalidate a manifest sitting in another.
+#
+# Installs the controller. It creates default IngressClasses and GatewayClasses
+# on startup (--install, on by default), so they are not listed here — one fewer
+# resource to keep in sync with the code that implements it, and no GatewayClass
+# in this file to fail on clusters without the Gateway API CRDs.
+#
+# Opt an Ingress or Gateway in with ingressClassName / gatewayClassName:
+# tunnel.pizza. This is not a default class; nothing is claimed implicitly.
+#
+# Point a workload at a different control plane with an annotation, on the
+# resource or on the class:
+#
+#   tunnel.pizza/provider: my-own-host.example
+#
+# Traffic does not transit the provider. The controller asks it for a
+# tunnel, then your cluster connects outbound to the edge and visitors reach you
+# over that connection. If the provider is unreachable, existing tunnels keep
+# serving and only new ones are blocked.
+#
+# SCAFFOLD — provisioning is not implemented. Matching resources receive an
+# "Unimplemented" event and no tunnel is created.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tunnel-system
+  labels:
+    app.kubernetes.io/name: tunnel
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tunnel-controller
+  namespace: tunnel-system
+  labels:
+    app.kubernetes.io/name: tunnel
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tunnel-controller
+  labels:
+    app.kubernetes.io/name: tunnel
+rules:
+  # --install creates the default classes. create is needed once; get and list let the
+  # controller recognise a class it already owns instead of erroring.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["get", "list", "watch", "create"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gatewayclasses"]
+    verbs: ["get", "list", "watch", "create"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gatewayclasses/status"]
+    verbs: ["get", "patch", "update"]
+  # The workload resources themselves.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways", "httproutes", "grpcroutes", "referencegrants"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways/status", "httproutes/status", "grpcroutes/status"]
+    verbs: ["get", "patch", "update"]
+  # Backend resolution.
+  - apiGroups: [""]
+    resources: ["services", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # Leader election, so two replicas never provision the same tunnel twice.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tunnel-controller
+  labels:
+    app.kubernetes.io/name: tunnel
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tunnel-controller
+subjects:
+  - kind: ServiceAccount
+    name: tunnel-controller
+    namespace: tunnel-system
+---
+# Tunnel credentials are written as Secrets, scoped to the controller's own
+# namespace so this cannot rewrite Secrets elsewhere in the cluster.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tunnel-controller
+  namespace: tunnel-system
+  labels:
+    app.kubernetes.io/name: tunnel
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tunnel-controller
+  namespace: tunnel-system
+  labels:
+    app.kubernetes.io/name: tunnel
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tunnel-controller
+subjects:
+  - kind: ServiceAccount
+    name: tunnel-controller
+    namespace: tunnel-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tunnel-controller
+  namespace: tunnel-system
+  labels:
+    app.kubernetes.io/name: tunnel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tunnel
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tunnel
+    spec:
+      serviceAccountName: tunnel-controller
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: controller
+          # Published from main by this repo's CI.
+          image: ghcr.io/scaffoldly/tunnel:latest
+          # Stated rather than inferred. Kubernetes already defaults to Always
+          # for a :latest tag, but that default flips to IfNotPresent the moment
+          # the tag is pinned — so writing it down keeps a restart picking up a
+          # rebuilt image instead of silently reusing a cached layer.
+          imagePullPolicy: Always
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: health
+              containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
