@@ -1,0 +1,17 @@
+{{- /*
+Off by default: `helm install -n` places the objects and --create-namespace
+makes the namespace, so a chart that renders its own would fight Helm over an
+object the user did not ask for.
+
+On for `make yaml`, which needs the served manifest to be self-contained —
+`kubectl apply -f https://tunnel.pizza` has no --create-namespace to lean on.
+*/ -}}
+{{- if .Values.namespace.create }}
+{{ include "tunnel.header" . }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Release.Namespace }}
+  labels:
+    {{- include "tunnel.labels" . | nindent 4 }}
+{{- end }}

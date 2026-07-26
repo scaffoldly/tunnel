@@ -1,0 +1,91 @@
+{{- /*
+Every rule here traces to a call site. An unused grant is a standing offer to
+whoever gets hold of this ServiceAccount, so nothing speculative goes in — new
+capability brings its rules in the same commit as the code that calls them.
+
+  ingresses (get/list/watch)     informer LIST/WATCH plus Reconcile's Get.
+
+  ingresses/status (update)      Reconcile's publish() writes the hostname to
+                                 status.loadBalancer.ingress[].hostname and
+                                 clears it when the tunnel fails. Status().Update
+                                 is a PUT on the subresource, hence update alone.
+                                 No "update" on ingresses itself: teardown needs
+                                 no finalizer, because the tunnel lives in the
+                                 controller process, not in the cluster.
+
+  services (get)                 (*Reconciler).port resolves a named port and
+                                 confirms it is exposed. Read through the
+                                 manager's *uncached* API reader, deliberately —
+                                 a cached Get would start an informer over every
+                                 Service in the cluster and need list/watch to do
+                                 it, for a handful of reads per Ingress change.
+
+  ingressclasses (+create)       Resolve spec.ingressClassName back to a
+                                 controller and a provider annotation; create for
+                                 --install. An existing class naming someone else
+                                 is read and left alone, so no update.
+
+  gateways, gatewayclasses       Same shape. Inert on clusters without the
+                                 Gateway API CRDs: the controllers do not
+                                 register there, and a rule naming an absent
+                                 group is not an error.
+
+  gatewayclasses/status (update) Gateway API requires the implementing controller
+                                 to publish Accepted, so the class reports
+                                 Accepted=False/Waiting until provisioning exists.
+
+  events.k8s.io/events           mgr.GetEventRecorder is the events.k8s.io/v1
+                                 client: it creates an event and patches it as
+                                 the series repeats, and never touches the core
+                                 "" events resource — so that group is
+                                 deliberately absent. kubectl describe still
+                                 shows these; the API server serves one store
+                                 through both endpoints.
+
+Deliberately absent:
+
+  coordination.k8s.io/leases     --leader-elect defaults to false and the
+                                 Deployment passes no args, so the manager never
+                                 takes a lease. This must come back before
+                                 replicas > 1 — two replicas both minting tunnels
+                                 for one Ingress leak a tunnel per reconcile.
+                                 Leader election emits its lock events through
+                                 the older core client, so it needs
+                                 ["" / events: create, patch] alongside it.
+
+  secrets                        The one to watch. Persisting a minted tunnel
+                                 spec so a restart keeps its hostname would need
+                                 a namespaced Role over them, landing with that
+                                 code.
+*/ -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "tunnel.fullname" . }}
+  labels:
+    {{- include "tunnel.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses/status"]
+    verbs: ["update"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["get", "list", "watch", "create"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gatewayclasses"]
+    verbs: ["get", "list", "watch", "create"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gatewayclasses/status"]
+    verbs: ["update"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]

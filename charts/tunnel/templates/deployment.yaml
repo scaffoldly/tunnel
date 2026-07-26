@@ -1,0 +1,76 @@
+{{- /*
+No namespaced Role: it existed only to write tunnel credentials as Secrets, and
+nothing writes a Secret yet. It returns, scoped to this namespace, with the code
+that stores a credential.
+
+Recreate rather than the default RollingUpdate: maxSurge rounds up to one surge
+pod at replicas: 1, and with leader election off both pods mint a tunnel for the
+same Ingress and race to write its status. Rolling buys nothing here anyway —
+tunnels are held in the controller process, so a new pod mints new hostnames
+whatever the strategy.
+
+No imagePullPolicy by default: Kubernetes infers Always from the :latest tag.
+Setting image.pullPolicy renders it explicitly, which is how a locally-built
+image gets used instead of a pull.
+*/ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tunnel.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tunnel.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "tunnel.labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "tunnel.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "tunnel.fullname" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: controller
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          {{- with .Values.image.pullPolicy }}
+          imagePullPolicy: {{ . }}
+          {{- end }}
+          {{- if not .Values.install }}
+          args:
+            - --install=false
+          {{- end }}
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: health
+              containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

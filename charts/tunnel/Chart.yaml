@@ -1,0 +1,9 @@
+apiVersion: v2
+name: tunnel
+description: Public reachability for a Kubernetes cluster via a tunnel provider.
+type: application
+version: 0.1.0
+appVersion: "latest"
+home: https://tunnel.pizza
+sources:
+  - https://github.com/scaffoldly/tunnel

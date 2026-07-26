@@ -1,0 +1,18 @@
+Two classes were created, one per tunnel provider:
+
+  tunnel.pizza            named hostnames under tunneled.pizza
+  api.trycloudflare.com   Cloudflare quick tunnels, no account, no us
+
+Opt a workload in (nothing is claimed implicitly — neither is a default class):
+
+  spec.ingressClassName: tunnel.pizza
+  spec.gatewayClassName: tunnel.pizza
+
+A claimed Ingress gets a tunnel to its backend Service; its hostname shows up in
+the ADDRESS column of `kubectl get ingress` in that workload's own namespace.
+Gateways are still a scaffold and receive an "Unimplemented" event.
+
+Point one at a different control plane with an annotation, on the resource or on
+its class:
+
+  tunnel.pizza/provider: my-own-host.example

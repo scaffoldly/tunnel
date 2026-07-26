@@ -5,18 +5,24 @@ on:
   push:
     branches:
       - main
-    # Version tags publish the semver tags below; main publishes :latest.
     tags:
       - "v*"
+    # Keep in sync with pull_request below; YAML anchors do not work here.
+    paths-ignore:
+      - "**.md"
+      - ".remember/**"
+      - "LICENSE*"
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - ".remember/**"
+      - "LICENSE*"
 
 permissions:
   contents: read
   packages: write
 
-# One run per ref. A second push supersedes the first rather than racing it to
-# the registry, which for :latest would otherwise be decided by which build
-# finished last rather than which commit is newer.
+# One run per ref, so pushes don't race each other to :latest.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -55,6 +61,16 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+      # install.yaml is what users kubectl apply; charts/tunnel renders it.
+      # Nothing enforces that they agree — see the note in install.yaml.
+      - name: Verify install.yaml matches the chart
+        run: |
+          make yaml
+          if ! git diff --exit-code install.yaml; then
+            echo "::error::install.yaml is stale; run 'make yaml' and commit the result"
+            exit 1
+          fi
 
   publish:
     # Pull requests reach `check` but stop here: a fork must not be able to push

@@ -4,8 +4,14 @@ Kubernetes controllers giving a cluster public reachability through a tunnel
 provider — no port forwarding, no DynDNS, no router configuration, and it works
 from behind carrier-grade NAT where port forwarding is impossible.
 
-**Scaffold. Nothing is implemented yet.** Matching Ingresses receive an
-`Unimplemented` warning event and no tunnel is created.
+**Ingress works.** A claimed Ingress gets a tunnel to its backend Service, and
+its public hostname appears in `status.loadBalancer.ingress[].hostname` — the
+ADDRESS column of `kubectl get ingress`. The tunnels are ephemeral quick
+tunnels held in the controller process, so the hostname changes whenever the
+controller restarts.
+
+**Gateway API is still a stub.** Matching Gateways receive an `Unimplemented`
+warning event and no tunnel is created.
 
 ## Install
 
@@ -69,4 +75,11 @@ would fight over ownership.
 ```bash
 go build ./...
 go run . --kubeconfig ~/.kube/config
+```
+
+`install.yaml` is rendered from `charts/tunnel` — edit the chart, not the
+manifest, then regenerate. CI fails on a stale manifest.
+
+```bash
+make yaml
 ```

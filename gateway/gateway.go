@@ -18,11 +18,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/events"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -40,6 +37,12 @@ var ControllerName = gatewayv1.GatewayController(reflect.TypeFor[Reconciler]().P
 
 // Name is the short label for this controller, used in logs and probes.
 var Name = path.Base(string(ControllerName))
+
+// ReporterName is the identity this controller's events are attributed to.
+//
+// Not ControllerName: the API server rejects an import path there, silently
+// dropping every event. See consts.Reporter.
+var ReporterName = consts.Reporter(string(ControllerName))
 
 // New registers the Gateway API controllers with mgr.
 //
@@ -63,7 +66,7 @@ func New(mgr ctrl.Manager, cfg config.Config) error {
 
 	r := &Reconciler{
 		Client:   mgr.GetClient(),
-		Recorder: mgr.GetEventRecorder(string(ControllerName)),
+		Recorder: mgr.GetEventRecorder(ReporterName),
 	}
 	if err := r.setup(mgr); err != nil {
 		return fmt.Errorf("setup gateway controller: %w", err)
@@ -77,66 +80,6 @@ func New(mgr ctrl.Manager, cfg config.Config) error {
 
 	mgr.GetLogger().Info("gateway controllers registered", "controller", ControllerName)
 	return nil
-}
-
-// installer creates the GatewayClass naming this controller once the manager
-// starts. Only reached when the Gateway API CRDs exist, since New returns
-// early otherwise.
-//
-// A Runnable rather than setup-time work because it needs a live connection,
-// and it builds its own client rather than using the manager's: the manager's
-// reads go through a cache that has not synced yet at this point.
-type installer struct {
-	cfg config.Config
-}
-
-func (i *installer) Start(ctx context.Context) error {
-	logger := log.FromContext(ctx).WithValues("gatewayclass", consts.DefaultProvider)
-
-	c, err := client.New(ctrl.GetConfigOrDie(), client.Options{Scheme: scheme()})
-	if err != nil {
-		return fmt.Errorf("build client: %w", err)
-	}
-
-	class := &gatewayv1.GatewayClass{
-		ObjectMeta: metav1.ObjectMeta{Name: consts.DefaultProvider},
-		Spec: gatewayv1.GatewayClassSpec{
-			ControllerName: ControllerName,
-			Description:    ptr.To(consts.GatewayClassDescription),
-		},
-	}
-
-	err = c.Create(ctx, class)
-	switch {
-	case err == nil:
-		logger.Info("created gatewayclass")
-		return nil
-	case apierrors.IsAlreadyExists(err):
-		// spec.controllerName is immutable, so a class owned by someone else
-		// is a real conflict rather than a no-op. Report it instead of
-		// pretending the install succeeded.
-		var existing gatewayv1.GatewayClass
-		if err := c.Get(ctx, client.ObjectKey{Name: consts.DefaultProvider}, &existing); err != nil {
-			return fmt.Errorf("get existing gatewayclass: %w", err)
-		}
-		if existing.Spec.ControllerName != ControllerName {
-			logger.Info("gatewayclass exists but names a different controller; leaving it alone",
-				"controller", existing.Spec.ControllerName)
-			return nil
-		}
-		logger.Info("gatewayclass already present")
-		return nil
-	default:
-		return fmt.Errorf("create gatewayclass: %w", err)
-	}
-}
-
-// scheme carries the Gateway API types the installer's own client needs; the
-// manager's scheme is not reachable from a Runnable.
-func scheme() *runtime.Scheme {
-	s := runtime.NewScheme()
-	utilruntime.Must(gatewayv1.Install(s))
-	return s
 }
 
 // installed reports whether the cluster serves the Gateway API group.
@@ -242,8 +185,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 }
 
 // provider reports whether this Gateway is ours and, if so, which host to mint
-// tunnels from. Same cascade as the Ingress half: the Gateway's own
-// annotation, then its class's, then DefaultProvider.
+// tunnels from. Same rule as the Ingress half: a GatewayClass is named for the
+// host it mints from, so choosing a class is the whole choice.
 //
 // This is what gets handed to libtunnel:
 //
@@ -268,13 +211,7 @@ func (r *Reconciler) provider(ctx context.Context, gw *gatewayv1.Gateway) (strin
 		return "", false, nil
 	}
 
-	if p := gw.Annotations[consts.AnnotationProvider]; p != "" {
-		return p, true, nil
-	}
-	if p := class.Annotations[consts.AnnotationProvider]; p != "" {
-		return p, true, nil
-	}
-	return consts.DefaultProvider, true, nil
+	return class.Name, true, nil
 }
 
 // upsert reports whether it changed conditions, so an unchanged status does not

@@ -1,33 +1,19 @@
-# tunnel — cluster install
-#
-#   kubectl apply -f https://tunnel.pizza
-#
-# tunnel.pizza redirects kubectl here, so this file and the controller it
-# installs version together. spec.controller must equal the controller's Go
-# import path, and keeping both in one repo means a package rename can no
-# longer invalidate a manifest sitting in another.
-#
-# Installs the controller. It creates default IngressClasses and GatewayClasses
-# on startup (--install, on by default), so they are not listed here — one fewer
-# resource to keep in sync with the code that implements it, and no GatewayClass
-# in this file to fail on clusters without the Gateway API CRDs.
-#
-# Opt an Ingress or Gateway in with ingressClassName / gatewayClassName:
-# tunnel.pizza. This is not a default class; nothing is claimed implicitly.
-#
-# Point a workload at a different control plane with an annotation, on the
-# resource or on the class:
-#
-#   tunnel.pizza/provider: my-own-host.example
-#
-# Traffic does not transit the provider. The controller asks it for a
-# tunnel, then your cluster connects outbound to the edge and visitors reach you
-# over that connection. If the provider is unreachable, existing tunnels keep
-# serving and only new ones are blocked.
-#
-# SCAFFOLD — provisioning is not implemented. Matching resources receive an
-# "Unimplemented" event and no tunnel is created.
 ---
+# Source: tunnel/templates/namespace.yaml
+# tunnel — https://github.com/scaffoldly/tunnel
+#
+# The controller creates two classes at startup, one per tunnel provider:
+#
+#   tunnel.pizza            named hostnames under tunneled.pizza
+#   api.trycloudflare.com   Cloudflare quick tunnels, no account, no us
+#
+# Opt a workload in with `ingressClassName: <one of the above>`. Neither is a
+# default class, so nothing is claimed implicitly. The public hostname then
+# appears in the ADDRESS column of `kubectl get ingress`, and is not stable
+# across controller restarts.
+#
+# Gateway API is not implemented yet: matching Gateways get an Unimplemented
+# event and no tunnel.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -35,6 +21,7 @@ metadata:
   labels:
     app.kubernetes.io/name: tunnel
 ---
+# Source: tunnel/templates/serviceaccount.yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -43,63 +30,40 @@ metadata:
   labels:
     app.kubernetes.io/name: tunnel
 ---
+# Source: tunnel/templates/clusterrole.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: tunnel-controller
   labels:
     app.kubernetes.io/name: tunnel
-# Scoped to what the unimplemented stub actually calls today, and no wider. Each
-# rule below is here because some line of Go needs it; provisioning will need
-# more, and those rules land in the same commit as the code that calls them.
-# Nothing here is speculative — an unused grant is a standing offer to whoever
-# gets hold of this ServiceAccount.
 rules:
-  # Ingress controller: informer LIST/WATCH plus Reconcile's Get.
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
     verbs: ["get", "list", "watch"]
-  # Read to resolve spec.ingressClassName back to a controller and a provider
-  # annotation; create for --install, which mints the default class at startup.
-  # An existing class naming someone else is read and left alone, so no update.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses/status"]
+    verbs: ["update"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingressclasses"]
     verbs: ["get", "list", "watch", "create"]
-  # Gateway controller. Unused on clusters without the Gateway API CRDs: the
-  # controllers do not register there, and a rule naming an absent group is
-  # inert rather than an error.
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["gateways"]
     verbs: ["get", "list", "watch"]
-  # Same shape as ingressclasses: resolve the class, and create it on --install.
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["gatewayclasses"]
     verbs: ["get", "list", "watch", "create"]
-  # The one status write in the tree. Gateway API requires the implementing
-  # controller to publish Accepted, so the class reports Accepted=False with
-  # reason Waiting until provisioning exists. Status().Update is a PUT on the
-  # subresource, hence update alone.
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["gatewayclasses/status"]
     verbs: ["update"]
-  # The "Unimplemented" event on a matching Ingress or Gateway. mgr.GetEventRecorder
-  # is the events.k8s.io/v1 client, which creates an event and patches it as the
-  # series repeats — it never touches the core "" events resource, so that group
-  # is deliberately absent. kubectl describe still shows these; the API server
-  # serves one store through both endpoints.
   - apiGroups: ["events.k8s.io"]
     resources: ["events"]
     verbs: ["create", "patch"]
-  # No coordination.k8s.io/leases: --leader-elect defaults to false and the
-  # Deployment below passes no args, so the manager never takes a lease. This
-  # rule must come back before replicas > 1 — two replicas both minting tunnels
-  # for one Ingress would leak a tunnel per reconcile. Leader election also
-  # emits its lock events through the older core client, so it needs
-  # ["" / events: create, patch] alongside the lease rule.
-  #
-  # No secrets, services, namespaces, endpointslices, or route types either:
-  # nothing reads them yet.
 ---
+# Source: tunnel/templates/clusterrolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -115,9 +79,7 @@ subjects:
     name: tunnel-controller
     namespace: tunnel-system
 ---
-# No namespaced Role: it existed only to write tunnel credentials as Secrets,
-# and nothing writes a Secret yet. It returns, scoped to tunnel-system, with the
-# code that stores a credential.
+# Source: tunnel/templates/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -127,6 +89,8 @@ metadata:
     app.kubernetes.io/name: tunnel
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: tunnel
@@ -143,13 +107,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: controller
-          # Published from main by this repo's CI.
-          image: ghcr.io/scaffoldly/tunnel:latest
-          # Stated rather than inferred. Kubernetes already defaults to Always
-          # for a :latest tag, but that default flips to IfNotPresent the moment
-          # the tag is pinned — so writing it down keeps a restart picking up a
-          # rebuilt image instead of silently reusing a cached layer.
-          imagePullPolicy: Always
+          image: "ghcr.io/scaffoldly/tunnel:latest"
           ports:
             - name: metrics
               containerPort: 8080

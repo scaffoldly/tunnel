@@ -1,0 +1,19 @@
+image:
+  repository: ghcr.io/scaffoldly/tunnel
+  tag: latest
+  # Empty renders no imagePullPolicy at all, which is what you want: Kubernetes
+  # infers Always for :latest and IfNotPresent for a pinned tag. Set it to
+  # override -- the e2e suite uses Never so a missing locally built image fails
+  # loudly instead of pulling the published one.
+  pullPolicy: ""
+
+# Have the controller create the default IngressClass and GatewayClass at
+# startup. On is the controller's own default and renders no args; off renders
+# --install=false.
+install: true
+
+namespace:
+  # Render a Namespace object. Off for `helm install`, which places objects with
+  # -n and makes the namespace with --create-namespace; on for `make yaml`, so
+  # the manifest served at https://tunnel.pizza is self-contained.
+  create: false

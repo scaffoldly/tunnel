@@ -3,21 +3,36 @@
 // The package path is the contract: an IngressClass claims this controller by
 // setting spec.controller to ControllerName, which is this package's import
 // path. The Gateway API half lives in package gateway alongside it.
+//
+// What it does, per claimed Ingress: resolve the provider host from the
+// annotation cascade, resolve the backend Service to a local origin URL, ask
+// libtunnel for a tunnel from that provider to that origin, and publish the
+// public hostname to status.loadBalancer.ingress[].hostname once the tunnel
+// is reachable end to end.
+//
+// The tunnel is held in this process — libtunnel runs the cloudflared engine
+// in-process — so requests arrive here and are proxied to the Service. That
+// makes the tunnel's lifetime the controller's lifetime: nothing is left in
+// the cluster to clean up on delete (hence no finalizer), and a restart mints
+// a new tunnel with a new hostname.
 package ingress
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"reflect"
+	"time"
 
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/scaffoldly/tunnel/config"
 	"github.com/scaffoldly/tunnel/consts"
@@ -32,10 +47,21 @@ var ControllerName = reflect.TypeFor[Reconciler]().PkgPath()
 // Name is the short label for this controller, used in logs and probes.
 var Name = path.Base(ControllerName)
 
+// ReporterName is the identity this controller's events are attributed to.
+//
+// Not ControllerName: the API server rejects an import path there, silently
+// dropping every event. See consts.Reporter.
+var ReporterName = consts.Reporter(ControllerName)
+
 // Reconciler wires Ingresses claimed by one of our IngressClasses to a tunnel.
 type Reconciler struct {
 	client.Client
+	// Services reads backend Services. Separate from Client because it is the
+	// manager's uncached reader — see (*Reconciler).port.
+	Services client.Reader
 	Recorder events.EventRecorder
+	// Tunnels owns the live tunnels; Reconcile only declares what it wants.
+	Tunnels *store
 }
 
 // New registers the Ingress controller with mgr.
@@ -43,13 +69,26 @@ type Reconciler struct {
 // Ingress is served by every cluster, so unlike the Gateway API half there is
 // no capability to probe for first.
 func New(mgr ctrl.Manager, cfg config.Config) error {
+	tunnels := newStore(mgr.GetLogger().WithName(consts.ControllerIngress), dial, consts.TunnelRetryInterval)
+	if err := mgr.Add(tunnels); err != nil {
+		return fmt.Errorf("add tunnel store: %w", err)
+	}
+
 	r := &Reconciler{
 		Client:   mgr.GetClient(),
-		Recorder: mgr.GetEventRecorder(ControllerName),
+		Services: mgr.GetAPIReader(),
+		Recorder: mgr.GetEventRecorder(ReporterName),
+		Tunnels:  tunnels,
 	}
 
 	if err := ctrl.NewControllerManagedBy(mgr).
 		For(&networkingv1.Ingress{}).
+		// A tunnel becomes ready seconds after it is asked for, and can drop
+		// long after that. Both are changes the Ingress's status has to
+		// follow, and neither is a change to any object the API server would
+		// tell us about — so the store wakes us directly instead of the
+		// controller polling every pending Ingress on a timer.
+		WatchesRawSource(source.Channel(tunnels.source(), &handler.EnqueueRequestForObject{})).
 		Named(consts.ControllerIngress).
 		Complete(r); err != nil {
 		return fmt.Errorf("setup ingress controller: %w", err)
@@ -65,101 +104,147 @@ func New(mgr ctrl.Manager, cfg config.Config) error {
 	return nil
 }
 
-// installer creates the IngressClass naming this controller once the manager
-// starts, so the shipped manifest carries only a Deployment.
-//
-// A Runnable rather than setup-time work because it needs a live connection,
-// and it builds its own client rather than using the manager's: the manager's
-// reads go through a cache that has not synced yet at this point.
-type installer struct {
-	cfg config.Config
-}
-
-func (i *installer) Start(ctx context.Context) error {
-	logger := log.FromContext(ctx).WithValues("ingressclass", consts.DefaultProvider)
-
-	c, err := client.New(ctrl.GetConfigOrDie(), client.Options{})
-	if err != nil {
-		return fmt.Errorf("build client: %w", err)
-	}
-
-	class := &networkingv1.IngressClass{
-		ObjectMeta: metav1.ObjectMeta{Name: consts.DefaultProvider},
-		Spec:       networkingv1.IngressClassSpec{Controller: ControllerName},
-	}
-
-	err = c.Create(ctx, class)
-	switch {
-	case err == nil:
-		logger.Info("created ingressclass")
-		return nil
-	case apierrors.IsAlreadyExists(err):
-		// Someone else owns this name. spec.controller is immutable, so if it
-		// points elsewhere this is a genuine conflict rather than a no-op —
-		// say so instead of pretending the install succeeded.
-		var existing networkingv1.IngressClass
-		if err := c.Get(ctx, client.ObjectKey{Name: consts.DefaultProvider}, &existing); err != nil {
-			return fmt.Errorf("get existing ingressclass: %w", err)
-		}
-		if existing.Spec.Controller != ControllerName {
-			logger.Info("ingressclass exists but names a different controller; leaving it alone",
-				"controller", existing.Spec.Controller)
-			return nil
-		}
-		logger.Info("ingressclass already present")
-		return nil
-	default:
-		return fmt.Errorf("create ingressclass: %w", err)
-	}
-}
-
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	var ing networkingv1.Ingress
 	if err := r.Get(ctx, req.NamespacedName, &ing); err != nil {
-		// Deleted between the event and this read. Nothing to undo yet; once
-		// tunnels are real this is where they get torn down.
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if apierrors.IsNotFound(err) {
+			// Deleted between the event and this read. The tunnel lives in
+			// this process, so closing it is the whole teardown — nothing
+			// survives in the cluster to need a finalizer.
+			r.Tunnels.forget(req.NamespacedName)
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
 	}
 
-	provider, ours, err := r.provider(ctx, &ing)
+	class, ours, err := r.class(ctx, &ing)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	if !ours {
 		// Another controller's Ingress, or no class at all. We are not a
-		// default class, so an unclassed Ingress is never ours.
+		// default class, so an unclassed Ingress is never ours. It may have
+		// been ours a moment ago, though — a reclassed Ingress has to give its
+		// tunnel back, and take our stale hostname off its status with it.
+		//
+		// Only if we were actually serving it: an Ingress that was never ours
+		// owns its own status, and writing to it would fight whichever
+		// controller does.
+		if r.Tunnels.forget(req.NamespacedName) {
+			if _, err := r.publish(ctx, &ing, ""); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 		return ctrl.Result{}, nil
 	}
 
-	logger.Info("unimplemented", "provider", provider, "ingress", req.NamespacedName)
+	origin, err := r.origin(ctx, &ing)
+	if err != nil {
+		r.Tunnels.forget(req.NamespacedName)
+		if _, clearErr := r.publish(ctx, &ing, ""); clearErr != nil {
+			return ctrl.Result{}, clearErr
+		}
+		if errors.Is(err, errUnsupported) {
+			// Nothing to retry: this is the spec, not the weather. Editing the
+			// Ingress brings us straight back here.
+			logger.Info("ingress not serviceable", "reason", err)
+			r.Recorder.Eventf(&ing, nil, consts.EventTypeWarning, consts.ReasonUnsupported,
+				consts.ActionProvision, consts.MsgUnsupportedFmt, err)
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
 
-	// Ingress has no conditions field, so an Event is the only place status
-	// can surface. `kubectl describe ingress` shows it.
-	r.Recorder.Eventf(&ing, nil, consts.EventTypeWarning, consts.ReasonUnimplemented, consts.ActionProvision,
-		consts.MsgUnimplementedFmt, provider)
+	provider := class.Name
+	status := r.Tunnels.ensure(req.NamespacedName, class, origin)
+	switch status.state {
+	case tunnelReady:
+		changed, err := r.publish(ctx, &ing, status.hostname)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if changed {
+			logger.Info("tunnel ready", "provider", provider, "origin", origin.String(),
+				"hostname", status.hostname)
+			// Ingress has no conditions field, so beyond status.loadBalancer an
+			// Event is the only place this can surface. `kubectl describe
+			// ingress` shows it.
+			r.Recorder.Eventf(&ing, nil, consts.EventTypeNormal, consts.ReasonTunnelReady,
+				consts.ActionProvision, consts.MsgTunnelReadyFmt, status.hostname, provider)
+		}
+		return ctrl.Result{}, nil
 
-	// status.loadBalancer stays empty on purpose. Publishing a hostname we
-	// cannot actually serve would be worse than publishing nothing.
-	return ctrl.Result{}, nil
+	case tunnelFailed:
+		// Stop advertising a hostname that no longer serves, and wait out the
+		// cooldown before minting a replacement.
+		if _, err := r.publish(ctx, &ing, ""); err != nil {
+			return ctrl.Result{}, err
+		}
+		logger.Info("tunnel failed", "provider", provider, "error", status.err,
+			"retryAt", status.retryAt)
+		r.Recorder.Eventf(&ing, nil, consts.EventTypeWarning, consts.ReasonTunnelFailed,
+			consts.ActionProvision, consts.MsgTunnelFailedFmt, status.err)
+		return ctrl.Result{RequeueAfter: time.Until(status.retryAt)}, nil
+
+	default:
+		// Minting or connecting. No requeue: the store wakes us when the
+		// hostname is real. Publishing one before it resolves would advertise
+		// an address that does not answer.
+		logger.Info("tunnel pending", "provider", provider, "origin", origin.String())
+		return ctrl.Result{}, nil
+	}
 }
 
-// provider reports whether this Ingress is ours and, if so, which host to mint
-// tunnels from.
+// publish writes the tunnel hostname to the Ingress's status, and reports
+// whether it had to. An empty hostname clears it.
 //
-// Resolution runs most-specific first: the Ingress's own annotation, then its
-// class's, then DefaultProvider. That lets one cluster default to a
-// provider while sending individual workloads somewhere else, without needing
-// a class per provider.
+// status.loadBalancer.ingress[].hostname is where an ingress controller states
+// the address it serves the Ingress on — it is what `kubectl get ingress`
+// prints under ADDRESS — so it is the one place a tunnel URL belongs.
+func (r *Reconciler) publish(ctx context.Context, ing *networkingv1.Ingress, hostname string) (bool, error) {
+	var want []networkingv1.IngressLoadBalancerIngress
+	if hostname != "" {
+		want = []networkingv1.IngressLoadBalancerIngress{{Hostname: hostname}}
+	}
+
+	have := ing.Status.LoadBalancer.Ingress
+	if len(have) == len(want) {
+		same := true
+		for i := range want {
+			if have[i].Hostname != want[i].Hostname || have[i].IP != want[i].IP {
+				same = false
+				break
+			}
+		}
+		if same {
+			return false, nil
+		}
+	}
+
+	ing.Status.LoadBalancer.Ingress = want
+	if err := r.Status().Update(ctx, ing); err != nil {
+		return false, fmt.Errorf("update ingress status: %w", err)
+	}
+	return true, nil
+}
+
+// class resolves the IngressClass this Ingress asks for, and reports whether
+// it is ours.
 //
-// This is what gets handed to libtunnel:
+// The class is the whole configuration: its name is the provider host the
+// tunnel is minted from, so `kubectl get ingressclass` reads as the list of
+// providers this cluster can reach. Nothing else selects one — an Ingress
+// picks a class, and that is the choice.
 //
-//	libtunnel.Cloudflare().WithProvider(provider)
-func (r *Reconciler) provider(ctx context.Context, ing *networkingv1.Ingress) (string, bool, error) {
+// This is what ends up handed to libtunnel:
+//
+//	libtunnel.Cloudflare().WithProvider(class.Name)
+func (r *Reconciler) class(ctx context.Context, ing *networkingv1.Ingress) (*networkingv1.IngressClass, bool, error) {
 	name := ing.Spec.IngressClassName
 	if name == nil || *name == "" {
-		return "", false, nil
+		return nil, false, nil
 	}
 
 	var class networkingv1.IngressClass
@@ -167,20 +252,14 @@ func (r *Reconciler) provider(ctx context.Context, ing *networkingv1.Ingress) (s
 		if apierrors.IsNotFound(err) {
 			// Dangling class reference. The Ingress is inert until the class
 			// exists, and it is not ours to complain about.
-			return "", false, nil
+			return nil, false, nil
 		}
-		return "", false, fmt.Errorf("get ingressclass %q: %w", *name, err)
+		return nil, false, fmt.Errorf("get ingressclass %q: %w", *name, err)
 	}
 
 	if class.Spec.Controller != ControllerName {
-		return "", false, nil
+		return nil, false, nil
 	}
 
-	if p := ing.Annotations[consts.AnnotationProvider]; p != "" {
-		return p, true, nil
-	}
-	if p := class.Annotations[consts.AnnotationProvider]; p != "" {
-		return p, true, nil
-	}
-	return consts.DefaultProvider, true, nil
+	return &class, true, nil
 }

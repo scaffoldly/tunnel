@@ -1,8 +1,14 @@
 // Command tunnel runs the controllers that give a cluster public reachability
 // through a tunnel provider.
 //
-// Nothing is implemented yet. The manager starts, the controllers register,
-// and matching Ingresses and Gateways receive an "Unimplemented" event.
+// The Ingress half provisions: an Ingress claimed by one of our IngressClasses
+// gets a tunnel from its provider to its backend Service, and the public
+// hostname is published to status.loadBalancer.ingress[].hostname — what
+// `kubectl get ingress` prints under ADDRESS. Traffic reaches the origin
+// through this process, which holds the edge connection.
+//
+// The Gateway API half is still a stub: matching Gateways receive an
+// "Unimplemented" event and matching GatewayClasses report Accepted=False.
 package main
 
 import (
