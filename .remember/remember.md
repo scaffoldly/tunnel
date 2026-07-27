@@ -5,7 +5,7 @@ Where the two overlap the definition wins, **except where this file says the
 definition is out of date**. The one place that mattered — the provider
 annotation cascade — has since been corrected in the definition itself.
 
-## State — HEAD `PENDING`, pushed, CI green, working tree clean
+## State — HEAD `5d3db56`, pushed, CI green, working tree clean
 
 In order: `1b90a58` Ingress provisioning with libtunnel, `28b8f31`
 served ports in status, `21e9ba0` ownerReferences on installed classes,
@@ -14,7 +14,7 @@ bundled Gateway API CRDs + `--install` split into three, `b4143ff` CRD bundle
 generated from the module, `6f572e3` Gateway provisioning, `502deca`
 GatewayClass Accepted + its tests, `5250558` the prose sweep and the
 regenerated manifest, `9f7e5d0` GatewayClass SupportedVersion, `5c40e97`
-provider resolution for annotation-driven tunnels (phase 1), `PENDING` the
+provider resolution for annotation-driven tunnels (phase 1), `5d3db56` the
 Service controller and its e2e (phase 2).
 
 **Both halves provision.** Ingress and Gateway each mint a real tunnel and
