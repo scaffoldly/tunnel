@@ -19,6 +19,14 @@ metadata:
   name: nginx-tunnel-pizza
   labels:
     app.kubernetes.io/managed-by: tunnel
+  annotations:
+    # The other direction of the same detection the service-annotate suite
+    # exercises: nginx declares no appProtocol and carries no protocol
+    # annotation, so the controller dialed it, was refused a TLS handshake, and
+    # concluded plaintext. A sniff hardwired to "https" fails here; one
+    # hardwired to "http" fails over there. Neither direction is proof on its
+    # own.
+    tunnel.pizza/protocol: http
   ownerReferences:
     - apiVersion: v1
       kind: Service
