@@ -38,6 +38,7 @@ import (
 
 	"github.com/scaffoldly/tunnel/config"
 	"github.com/scaffoldly/tunnel/consts"
+	"github.com/scaffoldly/tunnel/tunnels"
 )
 
 // ControllerName is the value an IngressClass must carry in spec.controller to
@@ -63,7 +64,7 @@ type Reconciler struct {
 	Services client.Reader
 	Recorder events.EventRecorder
 	// Tunnels owns the live tunnels; Reconcile only declares what it wants.
-	Tunnels *store
+	Tunnels *tunnels.Store
 }
 
 // New registers the Ingress controller with mgr.
@@ -71,8 +72,8 @@ type Reconciler struct {
 // Ingress is served by every cluster, so unlike the Gateway API half there is
 // no capability to probe for first.
 func New(mgr ctrl.Manager, cfg config.Config) error {
-	tunnels := newStore(mgr.GetLogger().WithName(consts.ControllerIngress), dial, consts.TunnelRetryInterval)
-	if err := mgr.Add(tunnels); err != nil {
+	store := tunnels.NewStore(mgr.GetLogger().WithName(consts.ControllerIngress), tunnels.Dial, consts.TunnelRetryInterval)
+	if err := mgr.Add(store); err != nil {
 		return fmt.Errorf("add tunnel store: %w", err)
 	}
 
@@ -80,7 +81,7 @@ func New(mgr ctrl.Manager, cfg config.Config) error {
 		Client:   mgr.GetClient(),
 		Services: mgr.GetAPIReader(),
 		Recorder: mgr.GetEventRecorder(ReporterName),
-		Tunnels:  tunnels,
+		Tunnels:  store,
 	}
 
 	if err := ctrl.NewControllerManagedBy(mgr).
@@ -90,7 +91,7 @@ func New(mgr ctrl.Manager, cfg config.Config) error {
 		// follow, and neither is a change to any object the API server would
 		// tell us about — so the store wakes us directly instead of the
 		// controller polling every pending Ingress on a timer.
-		WatchesRawSource(source.Channel(tunnels.source(), &handler.EnqueueRequestForObject{})).
+		WatchesRawSource(source.Channel(store.Source(), &handler.EnqueueRequestForObject{})).
 		Named(consts.ControllerIngress).
 		Complete(r); err != nil {
 		return fmt.Errorf("setup ingress controller: %w", err)
@@ -115,7 +116,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			// Deleted between the event and this read. The tunnel lives in
 			// this process, so closing it is the whole teardown — nothing
 			// survives in the cluster to need a finalizer.
-			r.Tunnels.forget(req.NamespacedName)
+			r.Tunnels.Forget(req.NamespacedName)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
@@ -134,7 +135,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		// Only if we were actually serving it: an Ingress that was never ours
 		// owns its own status, and writing to it would fight whichever
 		// controller does.
-		if r.Tunnels.forget(req.NamespacedName) {
+		if r.Tunnels.Forget(req.NamespacedName) {
 			if _, err := r.publish(ctx, &ing, ""); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -144,7 +145,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	origin, err := r.origin(ctx, &ing)
 	if err != nil {
-		r.Tunnels.forget(req.NamespacedName)
+		r.Tunnels.Forget(req.NamespacedName)
 		if _, clearErr := r.publish(ctx, &ing, ""); clearErr != nil {
 			return ctrl.Result{}, clearErr
 		}
@@ -160,35 +161,35 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	provider := class.Name
-	status := r.Tunnels.ensure(req.NamespacedName, class, origin)
-	switch status.state {
-	case tunnelReady:
-		changed, err := r.publish(ctx, &ing, status.hostname)
+	status := r.Tunnels.Ensure(req.NamespacedName, class, origin)
+	switch status.State {
+	case tunnels.Ready:
+		changed, err := r.publish(ctx, &ing, status.Hostname)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 		if changed {
 			logger.Info("tunnel ready", "provider", provider, "origin", origin.String(),
-				"hostname", status.hostname)
+				"hostname", status.Hostname)
 			// Ingress has no conditions field, so beyond status.loadBalancer an
 			// Event is the only place this can surface. `kubectl describe
 			// ingress` shows it.
 			r.Recorder.Eventf(&ing, nil, consts.EventTypeNormal, consts.ReasonTunnelReady,
-				consts.ActionProvision, consts.MsgTunnelReadyFmt, status.hostname, provider)
+				consts.ActionProvision, consts.MsgTunnelReadyFmt, status.Hostname, provider)
 		}
 		return ctrl.Result{}, nil
 
-	case tunnelFailed:
+	case tunnels.Failed:
 		// Stop advertising a hostname that no longer serves, and wait out the
 		// cooldown before minting a replacement.
 		if _, err := r.publish(ctx, &ing, ""); err != nil {
 			return ctrl.Result{}, err
 		}
-		logger.Info("tunnel failed", "provider", provider, "error", status.err,
-			"retryAt", status.retryAt)
+		logger.Info("tunnel failed", "provider", provider, "error", status.Err,
+			"retryAt", status.RetryAt)
 		r.Recorder.Eventf(&ing, nil, consts.EventTypeWarning, consts.ReasonTunnelFailed,
-			consts.ActionProvision, consts.MsgTunnelFailedFmt, status.err)
-		return ctrl.Result{RequeueAfter: time.Until(status.retryAt)}, nil
+			consts.ActionProvision, consts.MsgTunnelFailedFmt, status.Err)
+		return ctrl.Result{RequeueAfter: time.Until(status.RetryAt)}, nil
 
 	default:
 		// Minting or connecting. No requeue: the store wakes us when the

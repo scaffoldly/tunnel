@@ -139,7 +139,7 @@ const (
 	// MsgTunnelFailedFmt takes the error that ended the tunnel.
 	MsgTunnelFailedFmt = "tunnel failed: %v"
 	// MsgUnsupportedFmt takes the reason this Ingress cannot be served.
-	MsgUnsupportedFmt = "cannot serve this ingress: %v"
+	MsgUnsupportedFmt = "cannot serve this object: %v"
 )
 
 // Origin is how an Ingress backend is turned into the local URL a tunnel

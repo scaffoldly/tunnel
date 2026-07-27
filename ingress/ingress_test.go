@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/scaffoldly/tunnel/consts"
+	"github.com/scaffoldly/tunnel/tunnels"
 )
 
 // TestControllerNameIsThePackagePath guards the one contract nothing else
@@ -35,8 +36,8 @@ func TestControllerNameIsThePackagePath(t *testing.T) {
 // status.loadBalancer.ingress[].hostname, which is the ADDRESS column of
 // `kubectl get ingress`.
 func TestReconcilePublishesHostname(t *testing.T) {
-	tun := newFakeTunnel("brave-tuna.trycloudflare.com")
-	r, c, recorder, s := reconciler(t, func(_ string, _ *url.URL) tunnel { return tun },
+	tun := tunnels.NewFake("brave-tuna.trycloudflare.com")
+	r, c, recorder, s := reconciler(t, func(_ string, _ *url.URL) tunnels.Tunnel { return tun },
 		class(consts.ProviderTunnelPizza, ControllerName, nil),
 		service("default", "web", corev1.ServicePort{Name: "http", Port: 8080}),
 		claimedIngress(),
@@ -51,8 +52,8 @@ func TestReconcilePublishesHostname(t *testing.T) {
 		t.Fatalf("published %q while pending, want nothing", got)
 	}
 
-	tun.connect()
-	drain(t, s)
+	tun.Connect()
+	drainStore(t, s)
 
 	if _, err := r.Reconcile(context.Background(), request()); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
@@ -75,8 +76,8 @@ func TestReconcilePublishesHostname(t *testing.T) {
 // tunnel that has died, and that the retry is paced by the cooldown rather
 // than by the workqueue's much faster backoff.
 func TestReconcileClearsHostnameOnFailure(t *testing.T) {
-	tun := newFakeTunnel("brave-tuna.trycloudflare.com")
-	r, c, recorder, s := reconciler(t, func(_ string, _ *url.URL) tunnel { return tun },
+	tun := tunnels.NewFake("brave-tuna.trycloudflare.com")
+	r, c, recorder, s := reconciler(t, func(_ string, _ *url.URL) tunnels.Tunnel { return tun },
 		class(consts.ProviderTunnelPizza, ControllerName, nil),
 		service("default", "web", corev1.ServicePort{Name: "http", Port: 8080}),
 		claimedIngress(),
@@ -85,8 +86,8 @@ func TestReconcileClearsHostnameOnFailure(t *testing.T) {
 	if _, err := r.Reconcile(context.Background(), request()); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
-	tun.connect()
-	drain(t, s)
+	tun.Connect()
+	drainStore(t, s)
 	if _, err := r.Reconcile(context.Background(), request()); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
@@ -95,8 +96,8 @@ func TestReconcileClearsHostnameOnFailure(t *testing.T) {
 	}
 	assertEvent(t, recorder, consts.EventTypeNormal, consts.ReasonTunnelReady)
 
-	tun.fail(errors.New("edge connection lost"))
-	drain(t, s)
+	tun.Fail(errors.New("edge connection lost"))
+	drainStore(t, s)
 
 	res, err := r.Reconcile(context.Background(), request())
 	if err != nil {
@@ -120,9 +121,9 @@ func TestReconcileRefusesUnserviceableIngress(t *testing.T) {
 	ing.Spec.Rules[0].HTTP.Paths = append(ing.Spec.Rules[0].HTTP.Paths,
 		networkingv1.HTTPIngressPath{Path: "/api", Backend: numeric("api", 80)})
 
-	r, c, recorder, _ := reconciler(t, func(_ string, _ *url.URL) tunnel {
+	r, c, recorder, _ := reconciler(t, func(_ string, _ *url.URL) tunnels.Tunnel {
 		minted++
-		return newFakeTunnel("should-not-happen.example")
+		return tunnels.NewFake("should-not-happen.example")
 	},
 		class(consts.ProviderTunnelPizza, ControllerName, nil),
 		service("default", "web", corev1.ServicePort{Name: "http", Port: 8080}),
@@ -154,9 +155,9 @@ func TestReconcileIgnoresOtherControllers(t *testing.T) {
 	ing := claimedIngress()
 	ing.Spec.IngressClassName = ptr.To("nginx")
 
-	r, c, recorder, _ := reconciler(t, func(_ string, _ *url.URL) tunnel {
+	r, c, recorder, _ := reconciler(t, func(_ string, _ *url.URL) tunnels.Tunnel {
 		minted++
-		return newFakeTunnel("should-not-happen.example")
+		return tunnels.NewFake("should-not-happen.example")
 	},
 		class("nginx", "k8s.io/ingress-nginx", nil),
 		service("default", "web", corev1.ServicePort{Name: "http", Port: 8080}),
@@ -180,8 +181,8 @@ func TestReconcileIgnoresOtherControllers(t *testing.T) {
 // its status, or it keeps advertising an address nothing serves while its new
 // controller tries to publish its own.
 func TestReconcileReleasesReclassedIngress(t *testing.T) {
-	tun := newFakeTunnel("brave-tuna.trycloudflare.com")
-	r, c, _, s := reconciler(t, func(_ string, _ *url.URL) tunnel { return tun },
+	tun := tunnels.NewFake("brave-tuna.trycloudflare.com")
+	r, c, _, s := reconciler(t, func(_ string, _ *url.URL) tunnels.Tunnel { return tun },
 		class(consts.ProviderTunnelPizza, ControllerName, nil),
 		class("nginx", "k8s.io/ingress-nginx", nil),
 		service("default", "web", corev1.ServicePort{Name: "http", Port: 8080}),
@@ -191,8 +192,8 @@ func TestReconcileReleasesReclassedIngress(t *testing.T) {
 	if _, err := r.Reconcile(context.Background(), request()); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
-	tun.connect()
-	drain(t, s)
+	tun.Connect()
+	drainStore(t, s)
 	if _, err := r.Reconcile(context.Background(), request()); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
@@ -212,7 +213,7 @@ func TestReconcileReleasesReclassedIngress(t *testing.T) {
 	if _, err := r.Reconcile(context.Background(), request()); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
-	if s.tracking(testKey) {
+	if s.Tracking(testKey) {
 		t.Error("kept a tunnel for an ingress that is no longer ours")
 	}
 	if got := address(t, c); got != "" {
@@ -223,8 +224,8 @@ func TestReconcileReleasesReclassedIngress(t *testing.T) {
 // TestReconcileForgetsDeletedIngress proves a deleted Ingress releases its
 // tunnel. There is no finalizer, so this reconcile is the only teardown hook.
 func TestReconcileForgetsDeletedIngress(t *testing.T) {
-	tun := newFakeTunnel("brave-tuna.trycloudflare.com")
-	r, c, _, s := reconciler(t, func(_ string, _ *url.URL) tunnel { return tun },
+	tun := tunnels.NewFake("brave-tuna.trycloudflare.com")
+	r, c, _, s := reconciler(t, func(_ string, _ *url.URL) tunnels.Tunnel { return tun },
 		class(consts.ProviderTunnelPizza, ControllerName, nil),
 		service("default", "web", corev1.ServicePort{Name: "http", Port: 8080}),
 		claimedIngress(),
@@ -233,7 +234,7 @@ func TestReconcileForgetsDeletedIngress(t *testing.T) {
 	if _, err := r.Reconcile(context.Background(), request()); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
-	if !s.tracking(testKey) {
+	if !s.Tracking(testKey) {
 		t.Fatal("expected a tunnel for the ingress")
 	}
 
@@ -243,20 +244,21 @@ func TestReconcileForgetsDeletedIngress(t *testing.T) {
 	if _, err := r.Reconcile(context.Background(), request()); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
-	if s.tracking(testKey) {
+	if s.Tracking(testKey) {
 		t.Error("tunnel outlived its ingress")
 	}
 }
 
 // reconciler wires a Reconciler over a fake cluster and a store whose dialer
 // is under the test's control.
-func reconciler(t *testing.T, mint func(string, *url.URL) tunnel, objs ...client.Object) (
-	*Reconciler, client.Client, *events.FakeRecorder, *store,
+func reconciler(t *testing.T, mint func(string, *url.URL) tunnels.Tunnel, objs ...client.Object) (
+	*Reconciler, client.Client, *events.FakeRecorder, *tunnels.Store,
 ) {
 	t.Helper()
 	c := fakeClient(t, objs...)
 	recorder := events.NewFakeRecorder(16)
-	s := testStore(t, consts.TunnelRetryInterval, mint)
+	s := tunnels.NewTestStore(consts.TunnelRetryInterval, mint)
+	t.Cleanup(s.Close)
 	return &Reconciler{Client: c, Services: c, Recorder: recorder, Tunnels: s}, c, recorder, s
 }
 

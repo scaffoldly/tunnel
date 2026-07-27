@@ -15,6 +15,10 @@ artifactsDir: .kuttl
 # Default is 30s per step. Minting a tunnel and waiting for the edge to answer
 # takes longer than that on a cold run.
 timeout: 180
+# Serial. Both tests mint a real tunnel against a live provider, and running
+# them together doubles the concurrent load for no wall-clock gain — the mint
+# is the long pole either way.
+parallel: 1
 
 commands:
   # Build the working tree, not whatever :latest resolves to. A suite that

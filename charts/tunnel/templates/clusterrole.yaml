@@ -37,6 +37,14 @@ capability brings its rules in the same commit as the code that calls them.
                                  register there, and a rule naming an absent
                                  group is not an error.
 
+  httproutes (get/list/watch)    A Gateway names no backend; routes attach to
+                                 it, so the origin comes from whichever
+                                 HTTPRoutes accept it as a parent.
+
+  gateways/status (update)       publish() writes the tunnel hostname to
+                                 status.addresses, the Gateway API's equivalent
+                                 of the Ingress status.loadBalancer.
+
   gatewayclasses/status (update) Gateway API requires the implementing controller
                                  to publish Accepted, so the class reports
                                  Accepted=False/Waiting until provisioning exists.
@@ -100,6 +108,12 @@ rules:
     verbs: ["get", "list", "watch", "create"]
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["gateways"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways/status"]
+    verbs: ["update"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["gatewayclasses"]

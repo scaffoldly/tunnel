@@ -1,6 +1,6 @@
-# FAILING ON PURPOSE, and unreachable until 01-assert passes: there is no
-# address to fetch. Same two scripts as the ingress suite, so the day gateway
-# provisioning lands this needs no rewriting.
+# Fetches the address the Gateway published, the same way the ingress suite
+# does. status.addresses[0].value rather than a hostname field: the Gateway API
+# models an address as a typed value.
 apiVersion: kuttl.dev/v1beta1
 kind: TestStep
 commands:

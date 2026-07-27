@@ -11,22 +11,31 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"reflect"
+	"time"
 
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/scaffoldly/tunnel/config"
 	"github.com/scaffoldly/tunnel/consts"
+	"github.com/scaffoldly/tunnel/tunnels"
 )
 
 // ControllerName is the value a GatewayClass must carry in spec.controllerName
@@ -83,11 +92,18 @@ func New(mgr ctrl.Manager, cfg config.Config) error {
 		return fmt.Errorf("setup gatewayclass controller: %w", err)
 	}
 
+	store := tunnels.NewStore(mgr.GetLogger().WithName(consts.ControllerGateway), tunnels.Dial, consts.TunnelRetryInterval)
+	if err := mgr.Add(store); err != nil {
+		return fmt.Errorf("add tunnel store: %w", err)
+	}
+
 	r := &Reconciler{
 		Client:   mgr.GetClient(),
+		Services: mgr.GetAPIReader(),
 		Recorder: mgr.GetEventRecorder(ReporterName),
+		Tunnels:  store,
 	}
-	if err := r.setup(mgr); err != nil {
+	if err := r.setup(mgr, store); err != nil {
 		return fmt.Errorf("setup gateway controller: %w", err)
 	}
 
@@ -167,53 +183,168 @@ func (r *ClassReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 // Reconciler wires Gateways claimed by one of our GatewayClasses to a tunnel.
 type Reconciler struct {
 	client.Client
+	// Services reads backend Services. Separate from Client because it is the
+	// manager's uncached reader — see (*Reconciler).port.
+	Services client.Reader
 	Recorder events.EventRecorder
+	// Tunnels owns the live tunnels; Reconcile only declares what it wants.
+	Tunnels *tunnels.Store
 }
 
-func (r *Reconciler) setup(mgr ctrl.Manager) error {
+func (r *Reconciler) setup(mgr ctrl.Manager, store *tunnels.Store) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&gatewayv1.Gateway{}).
+		// Routes carry the backends, so a Gateway's origin changes when its
+		// routes do without the Gateway itself being touched.
+		Watches(&gatewayv1.HTTPRoute{}, handler.EnqueueRequestsFromMapFunc(routeParents)).
+		// A tunnel becomes ready seconds after it is asked for and can drop
+		// long after that; neither is a change to any object the API server
+		// would report.
+		WatchesRawSource(source.Channel(store.Source(), &handler.EnqueueRequestForObject{})).
 		Named(consts.ControllerGateway).
 		Complete(r)
 }
 
+// routeParents maps an HTTPRoute to the Gateways it attaches to, so a route
+// added, edited, or deleted re-reconciles whatever it points at.
+func routeParents(_ context.Context, obj client.Object) []reconcile.Request {
+	route, ok := obj.(*gatewayv1.HTTPRoute)
+	if !ok {
+		return nil
+	}
+	var out []reconcile.Request
+	for _, ref := range route.Spec.ParentRefs {
+		if ref.Kind != nil && *ref.Kind != "Gateway" {
+			continue
+		}
+		ns := route.Namespace
+		if ref.Namespace != nil {
+			ns = string(*ref.Namespace)
+		}
+		out = append(out, reconcile.Request{
+			NamespacedName: types.NamespacedName{Namespace: ns, Name: string(ref.Name)},
+		})
+	}
+	return out
+}
+
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
 	var gw gatewayv1.Gateway
 	if err := r.Get(ctx, req.NamespacedName, &gw); err != nil {
-		// Deleted between the event and this read. Nothing to undo yet; once
-		// tunnels are real this is where they get torn down.
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if apierrors.IsNotFound(err) {
+			// Deleted between the event and this read. The tunnel lives in
+			// this process, so closing it is the whole teardown.
+			r.Tunnels.Forget(req.NamespacedName)
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
 	}
 
-	provider, ours, err := r.provider(ctx, &gw)
+	class, ours, err := r.class(ctx, &gw)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	if !ours {
+		// Someone else's Gateway, or a dangling class. It may have been ours a
+		// moment ago, though, and a reclassed Gateway has to give its tunnel
+		// back and take our stale address with it.
+		if r.Tunnels.Forget(req.NamespacedName) {
+			if _, err := r.publish(ctx, &gw, ""); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 		return ctrl.Result{}, nil
 	}
 
-	log.FromContext(ctx).Info("unimplemented", "provider", provider, "gateway", req.NamespacedName)
+	origin, err := r.origin(ctx, &gw)
+	if err != nil {
+		r.Tunnels.Forget(req.NamespacedName)
+		if _, clearErr := r.publish(ctx, &gw, ""); clearErr != nil {
+			return ctrl.Result{}, clearErr
+		}
+		if errors.Is(err, errUnsupported) {
+			// Nothing to retry: this is the spec, not the weather. A Gateway
+			// with no routes yet lands here, which is why it is reported
+			// rather than treated as an error.
+			logger.Info("gateway not serviceable", "reason", err)
+			r.Recorder.Eventf(&gw, nil, consts.EventTypeWarning, consts.ReasonUnsupported,
+				consts.ActionProvision, consts.MsgUnsupportedFmt, err)
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
 
-	r.Recorder.Eventf(&gw, nil, consts.EventTypeWarning, consts.ReasonUnimplemented, consts.ActionProvision,
-		consts.MsgUnimplementedFmt, provider)
+	provider := class.Name
+	status := r.Tunnels.Ensure(req.NamespacedName, class, origin)
+	switch status.State {
+	case tunnels.Ready:
+		changed, err := r.publish(ctx, &gw, status.Hostname)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if changed {
+			logger.Info("tunnel ready", "provider", provider, "origin", origin.String(),
+				"hostname", status.Hostname)
+			r.Recorder.Eventf(&gw, nil, consts.EventTypeNormal, consts.ReasonTunnelReady,
+				consts.ActionProvision, consts.MsgTunnelReadyFmt, status.Hostname, provider)
+		}
+		return ctrl.Result{}, nil
 
-	// status.addresses stays empty on purpose. Publishing an address we cannot
-	// actually serve would be worse than publishing nothing.
-	return ctrl.Result{}, nil
+	case tunnels.Failed:
+		if _, err := r.publish(ctx, &gw, ""); err != nil {
+			return ctrl.Result{}, err
+		}
+		logger.Info("tunnel failed", "provider", provider, "error", status.Err,
+			"retryAt", status.RetryAt)
+		r.Recorder.Eventf(&gw, nil, consts.EventTypeWarning, consts.ReasonTunnelFailed,
+			consts.ActionProvision, consts.MsgTunnelFailedFmt, status.Err)
+		return ctrl.Result{RequeueAfter: time.Until(status.RetryAt)}, nil
+
+	default:
+		logger.Info("tunnel pending", "provider", provider, "origin", origin.String())
+		return ctrl.Result{}, nil
+	}
 }
 
-// provider reports whether this Gateway is ours and, if so, which host to mint
-// tunnels from. Same rule as the Ingress half: a GatewayClass is named for the
-// host it mints from, so choosing a class is the whole choice.
+// publish writes the tunnel hostname to the Gateway's status, and reports
+// whether it had to. An empty hostname clears it.
+//
+// status.addresses is the Gateway API's equivalent of the Ingress's
+// status.loadBalancer — where the implementing controller states the address
+// it serves on. Type Hostname because a tunnel has no routable IP.
+func (r *Reconciler) publish(ctx context.Context, gw *gatewayv1.Gateway, hostname string) (bool, error) {
+	var want []gatewayv1.GatewayStatusAddress
+	if hostname != "" {
+		want = []gatewayv1.GatewayStatusAddress{{
+			Type:  ptr.To(gatewayv1.HostnameAddressType),
+			Value: hostname,
+		}}
+	}
+
+	if apiequality.Semantic.DeepEqual(gw.Status.Addresses, want) {
+		return false, nil
+	}
+
+	gw.Status.Addresses = want
+	if err := r.Status().Update(ctx, gw); err != nil {
+		return false, fmt.Errorf("update gateway status: %w", err)
+	}
+	return true, nil
+}
+
+// class resolves the GatewayClass this Gateway asks for, and reports whether
+// it is ours. Same rule as the Ingress half: a class is named for the host it
+// mints from, so choosing a class is the whole choice.
 //
 // This is what gets handed to libtunnel:
 //
 //	libtunnel.Cloudflare().WithProvider(provider)
-func (r *Reconciler) provider(ctx context.Context, gw *gatewayv1.Gateway) (string, bool, error) {
+func (r *Reconciler) class(ctx context.Context, gw *gatewayv1.Gateway) (*gatewayv1.GatewayClass, bool, error) {
 	name := string(gw.Spec.GatewayClassName)
 	if name == "" {
-		return "", false, nil
+		return nil, false, nil
 	}
 
 	var class gatewayv1.GatewayClass
@@ -221,16 +352,16 @@ func (r *Reconciler) provider(ctx context.Context, gw *gatewayv1.Gateway) (strin
 		if apierrors.IsNotFound(err) {
 			// Dangling class reference. The Gateway is inert until the class
 			// exists, and it is not ours to complain about.
-			return "", false, nil
+			return nil, false, nil
 		}
-		return "", false, fmt.Errorf("get gatewayclass %q: %w", name, err)
+		return nil, false, fmt.Errorf("get gatewayclass %q: %w", name, err)
 	}
 
 	if class.Spec.ControllerName != ControllerName {
-		return "", false, nil
+		return nil, false, nil
 	}
 
-	return class.Name, true, nil
+	return &class, true, nil
 }
 
 // upsert reports whether it changed conditions, so an unchanged status does not

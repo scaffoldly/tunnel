@@ -1,4 +1,4 @@
-package ingress
+package tunnels
 
 import (
 	"errors"
@@ -22,14 +22,14 @@ func testOrigin(t *testing.T, raw string) *url.URL {
 }
 
 // TestStoreEnsureIsIdempotent proves that repeated reconciles of an unchanged
-// Ingress reuse one tunnel. Getting this wrong mints a tunnel per reconcile
+// Ingress reuse one Tunnel. Getting this wrong mints a Tunnel per reconcile
 // against a live, unmetered provider, which is the single most expensive bug
 // this package can have.
 func TestStoreEnsureIsIdempotent(t *testing.T) {
 	var mu sync.Mutex
 	var mints int
 
-	s := testStore(t, time.Minute, func(_ string, _ *url.URL) tunnel {
+	s := testStore(t, time.Minute, func(_ string, _ *url.URL) Tunnel {
 		mu.Lock()
 		defer mu.Unlock()
 		mints++
@@ -38,8 +38,8 @@ func TestStoreEnsureIsIdempotent(t *testing.T) {
 
 	origin := testOrigin(t, "http://web.default.svc:8080")
 	for range 5 {
-		if got := s.ensure(testKey, testClass("tunnel.pizza"), origin).state; got != tunnelPending {
-			t.Fatalf("ensure() state = %v, want tunnelPending", got)
+		if got := s.Ensure(testKey, testClass("tunnel.pizza"), origin).State; got != Pending {
+			t.Fatalf("ensure() state = %v, want Pending", got)
 		}
 	}
 
@@ -50,66 +50,66 @@ func TestStoreEnsureIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestStoreReady walks the happy path: pending until the tunnel connects, then
+// TestStoreReady walks the happy path: pending until the Tunnel connects, then
 // ready with the hostname, and a wake-up so the controller comes back for it.
 func TestStoreReady(t *testing.T) {
 	tun := newFakeTunnel("brave-tuna.trycloudflare.com")
-	s := testStore(t, time.Minute, func(_ string, _ *url.URL) tunnel { return tun })
+	s := testStore(t, time.Minute, func(_ string, _ *url.URL) Tunnel { return tun })
 	origin := testOrigin(t, "http://web.default.svc:8080")
 
-	if got := s.ensure(testKey, testClass("tunnel.pizza"), origin); got.state != tunnelPending {
-		t.Fatalf("ensure() state = %v, want tunnelPending", got.state)
+	if got := s.Ensure(testKey, testClass("tunnel.pizza"), origin); got.State != Pending {
+		t.Fatalf("ensure() state = %v, want Pending", got.State)
 	}
 
 	tun.connect()
 	drain(t, s)
 
-	got := s.ensure(testKey, testClass("tunnel.pizza"), origin)
-	if got.state != tunnelReady {
-		t.Fatalf("ensure() state = %v, want tunnelReady", got.state)
+	got := s.Ensure(testKey, testClass("tunnel.pizza"), origin)
+	if got.State != Ready {
+		t.Fatalf("ensure() state = %v, want Ready", got.State)
 	}
-	if got.hostname != "brave-tuna.trycloudflare.com" {
-		t.Errorf("ensure() hostname = %q, want %q", got.hostname, "brave-tuna.trycloudflare.com")
+	if got.Hostname != "brave-tuna.trycloudflare.com" {
+		t.Errorf("ensure() hostname = %q, want %q", got.Hostname, "brave-tuna.trycloudflare.com")
 	}
 }
 
-// TestStoreReadyThenDropped covers a tunnel that dies after it was serving:
-// the store has to notice and stop reporting a hostname, or the Ingress keeps
+// TestStoreReadyThenDropped covers a Tunnel that dies after it was serving:
+// the Store has to notice and stop reporting a hostname, or the Ingress keeps
 // advertising an address that no longer answers.
 func TestStoreReadyThenDropped(t *testing.T) {
 	tun := newFakeTunnel("brave-tuna.trycloudflare.com")
-	s := testStore(t, time.Minute, func(_ string, _ *url.URL) tunnel { return tun })
+	s := testStore(t, time.Minute, func(_ string, _ *url.URL) Tunnel { return tun })
 	origin := testOrigin(t, "http://web.default.svc:8080")
 
-	s.ensure(testKey, testClass("tunnel.pizza"), origin)
+	s.Ensure(testKey, testClass("tunnel.pizza"), origin)
 	tun.connect()
 	drain(t, s)
-	if got := s.ensure(testKey, testClass("tunnel.pizza"), origin).state; got != tunnelReady {
-		t.Fatalf("ensure() state = %v, want tunnelReady", got)
+	if got := s.Ensure(testKey, testClass("tunnel.pizza"), origin).State; got != Ready {
+		t.Fatalf("ensure() state = %v, want Ready", got)
 	}
 
 	tun.fail(errors.New("edge connection lost"))
 	drain(t, s)
 
-	got := s.ensure(testKey, testClass("tunnel.pizza"), origin)
-	if got.state != tunnelFailed {
-		t.Fatalf("ensure() state = %v, want tunnelFailed", got.state)
+	got := s.Ensure(testKey, testClass("tunnel.pizza"), origin)
+	if got.State != Failed {
+		t.Fatalf("ensure() state = %v, want Failed", got.State)
 	}
-	if got.err == nil || got.err.Error() != "edge connection lost" {
-		t.Errorf("ensure() err = %v, want \"edge connection lost\"", got.err)
+	if got.Err == nil || got.Err.Error() != "edge connection lost" {
+		t.Errorf("ensure() err = %v, want \"edge connection lost\"", got.Err)
 	}
-	if got.hostname != "" {
-		t.Errorf("ensure() hostname = %q, want empty once failed", got.hostname)
+	if got.Hostname != "" {
+		t.Errorf("ensure() hostname = %q, want empty once failed", got.Hostname)
 	}
 }
 
-// TestStoreFailureCooldown is the retry-storm guard: a failed tunnel is not
+// TestStoreFailureCooldown is the retry-storm guard: a failed Tunnel is not
 // re-minted until its cooldown expires.
 func TestStoreFailureCooldown(t *testing.T) {
 	var mu sync.Mutex
 	var minted []*fakeTunnel
 
-	s := testStore(t, time.Minute, func(_ string, _ *url.URL) tunnel {
+	s := testStore(t, time.Minute, func(_ string, _ *url.URL) Tunnel {
 		mu.Lock()
 		defer mu.Unlock()
 		tun := newFakeTunnel("host.example")
@@ -121,7 +121,7 @@ func TestStoreFailureCooldown(t *testing.T) {
 	base := time.Now()
 	restore := freezeClock(t, base)
 
-	s.ensure(testKey, testClass("tunnel.pizza"), origin)
+	s.Ensure(testKey, testClass("tunnel.pizza"), origin)
 	mu.Lock()
 	first := minted[0]
 	mu.Unlock()
@@ -130,8 +130,8 @@ func TestStoreFailureCooldown(t *testing.T) {
 
 	// Still inside the cooldown: the same failure comes back, no new mint.
 	restore(base.Add(59 * time.Second))
-	if got := s.ensure(testKey, testClass("tunnel.pizza"), origin).state; got != tunnelFailed {
-		t.Fatalf("ensure() state = %v, want tunnelFailed", got)
+	if got := s.Ensure(testKey, testClass("tunnel.pizza"), origin).State; got != Failed {
+		t.Fatalf("ensure() state = %v, want Failed", got)
 	}
 	mu.Lock()
 	n := len(minted)
@@ -142,8 +142,8 @@ func TestStoreFailureCooldown(t *testing.T) {
 
 	// Past it: a replacement is minted and starts out pending again.
 	restore(base.Add(61 * time.Second))
-	if got := s.ensure(testKey, testClass("tunnel.pizza"), origin).state; got != tunnelPending {
-		t.Fatalf("ensure() state = %v, want tunnelPending after the cooldown", got)
+	if got := s.Ensure(testKey, testClass("tunnel.pizza"), origin).State; got != Pending {
+		t.Fatalf("ensure() state = %v, want Pending after the cooldown", got)
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -152,8 +152,8 @@ func TestStoreFailureCooldown(t *testing.T) {
 	}
 }
 
-// TestStoreRebuildsOnChange proves a repointed Ingress gets a new tunnel: the
-// hostname is bound to the credentials, so an existing tunnel cannot be aimed
+// TestStoreRebuildsOnChange proves a repointed Ingress gets a new Tunnel: the
+// hostname is bound to the credentials, so an existing Tunnel cannot be aimed
 // somewhere else.
 func TestStoreRebuildsOnChange(t *testing.T) {
 	type mint struct {
@@ -163,7 +163,7 @@ func TestStoreRebuildsOnChange(t *testing.T) {
 	var mu sync.Mutex
 	var mints []mint
 
-	s := testStore(t, time.Minute, func(provider string, origin *url.URL) tunnel {
+	s := testStore(t, time.Minute, func(provider string, origin *url.URL) Tunnel {
 		mu.Lock()
 		defer mu.Unlock()
 		mints = append(mints, mint{provider: provider, origin: origin.String()})
@@ -173,10 +173,10 @@ func TestStoreRebuildsOnChange(t *testing.T) {
 	first := testOrigin(t, "http://web.default.svc:8080")
 	second := testOrigin(t, "http://web.default.svc:9090")
 
-	s.ensure(testKey, testClass("tunnel.pizza"), first)
-	s.ensure(testKey, testClass("tunnel.pizza"), second)  // origin changed
-	s.ensure(testKey, testClass("other.example"), second) // provider changed
-	s.ensure(testKey, testClass("other.example"), second) // unchanged
+	s.Ensure(testKey, testClass("tunnel.pizza"), first)
+	s.Ensure(testKey, testClass("tunnel.pizza"), second)  // origin changed
+	s.Ensure(testKey, testClass("other.example"), second) // provider changed
+	s.Ensure(testKey, testClass("other.example"), second) // unchanged
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -201,7 +201,7 @@ func TestStoreForget(t *testing.T) {
 	var mu sync.Mutex
 	var mints int
 
-	s := testStore(t, time.Minute, func(_ string, _ *url.URL) tunnel {
+	s := testStore(t, time.Minute, func(_ string, _ *url.URL) Tunnel {
 		mu.Lock()
 		defer mu.Unlock()
 		mints++
@@ -209,10 +209,10 @@ func TestStoreForget(t *testing.T) {
 	})
 	origin := testOrigin(t, "http://web.default.svc:8080")
 
-	s.ensure(testKey, testClass("tunnel.pizza"), origin)
-	s.forget(testKey)
-	s.forget(testKey) // idempotent
-	s.ensure(testKey, testClass("tunnel.pizza"), origin)
+	s.Ensure(testKey, testClass("tunnel.pizza"), origin)
+	s.Forget(testKey)
+	s.Forget(testKey) // idempotent
+	s.Ensure(testKey, testClass("tunnel.pizza"), origin)
 
 	mu.Lock()
 	defer mu.Unlock()
