@@ -1,24 +1,12 @@
 # Copyright The Kubernetes Authors.
+# Licensed under the Apache License, Version 2.0.
+# http://www.apache.org/licenses/LICENSE-2.0
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-#
-# Gateway API Standard channel install
-#
+# Gateway API standard channel, v1.6.1.
+# Generated from the sigs.k8s.io/gateway-api module.
+# Do not edit: run `go generate ./gateway/...`.
 ---
-#
-# config/crd/standard/gateway.networking.k8s.io_backendtlspolicies.yaml
-#
+# source: gateway.networking.k8s.io_backendtlspolicies.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -1396,9 +1384,7 @@ spec:
     subresources:
       status: {}
 ---
-#
-# config/crd/standard/gateway.networking.k8s.io_gatewayclasses.yaml
-#
+# source: gateway.networking.k8s.io_gatewayclasses.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -1912,9 +1898,7 @@ spec:
     subresources:
       status: {}
 ---
-#
-# config/crd/standard/gateway.networking.k8s.io_gateways.yaml
-#
+# source: gateway.networking.k8s.io_gateways.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -5207,9 +5191,7 @@ spec:
     subresources:
       status: {}
 ---
-#
-# config/crd/standard/gateway.networking.k8s.io_grpcroutes.yaml
-#
+# source: gateway.networking.k8s.io_grpcroutes.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -7283,9 +7265,7 @@ spec:
     subresources:
       status: {}
 ---
-#
-# config/crd/standard/gateway.networking.k8s.io_httproutes.yaml
-#
+# source: gateway.networking.k8s.io_httproutes.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -14206,9 +14186,7 @@ spec:
     subresources:
       status: {}
 ---
-#
-# config/crd/standard/gateway.networking.k8s.io_listenersets.yaml
-#
+# source: gateway.networking.k8s.io_listenersets.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -14984,9 +14962,7 @@ spec:
     subresources:
       status: {}
 ---
-#
-# config/crd/standard/gateway.networking.k8s.io_referencegrants.yaml
-#
+# source: gateway.networking.k8s.io_referencegrants.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -15339,9 +15315,7 @@ spec:
     storage: true
     subresources: {}
 ---
-#
-# config/crd/standard/gateway.networking.k8s.io_tcproutes.yaml
-#
+# source: gateway.networking.k8s.io_tcproutes.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -16635,9 +16609,7 @@ spec:
     subresources:
       status: {}
 ---
-#
-# config/crd/standard/gateway.networking.k8s.io_tlsroutes.yaml
-#
+# source: gateway.networking.k8s.io_tlsroutes.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -18762,9 +18734,7 @@ spec:
     subresources:
       status: {}
 ---
-#
-# config/crd/standard/gateway.networking.k8s.io_udproutes.yaml
-#
+# source: gateway.networking.k8s.io_udproutes.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -20058,9 +20028,7 @@ spec:
     subresources:
       status: {}
 ---
-#
-# config/crd/standard/gateway.networking.k8s.io_vap_safeupgrades.yaml
-#
+# source: gateway.networking.k8s.io_vap_safeupgrades.yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:

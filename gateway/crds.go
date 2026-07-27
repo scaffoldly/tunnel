@@ -24,11 +24,17 @@ const (
 	annotationChannel       = "gateway.networking.k8s.io/channel"
 )
 
-// crdYAML is the standard channel bundle, vendored at the version in go.mod.
-// Regenerate with `make crds` when that version moves; the two disagreeing
-// would mean installing a schema the controller cannot deserialize.
+// crdYAML is the standard channel bundle, copied from the gateway-api module
+// itself rather than fetched from a release URL — go:embed cannot reach into a
+// dependency, so it has to be vendored, but it can be vendored from the exact
+// version the compiler resolved.
 //
-//go:embed crds/standard-install.yaml
+// Regenerate with `go generate ./gateway/...` when go.mod moves; a test fails
+// if the two disagree, because installing a schema the controller cannot
+// deserialize is worse than not installing one.
+//
+//go:generate make -C .. crds
+//go:embed crds/zz_generated.standard-install.yaml
 var crdYAML []byte
 
 // bundledVersion is the release the vendored bundle must carry. A test pins it
