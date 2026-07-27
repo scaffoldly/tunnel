@@ -28,48 +28,57 @@ const probeTimeout = 3 * time.Second
 // without a network, and so this stays the one place that opens a socket.
 type Prober func(ctx context.Context, address string) (string, error)
 
-// Probe is the production Prober: connect, offer a TLS handshake, and see what
-// comes back.
+// Probe is the production Prober: try to speak TLS to the origin, and fall
+// back to a plain connection.
 //
-// Best effort by construction, and worth being precise about what it can and
-// cannot tell. A completed handshake is strong evidence — a plaintext server
-// cannot produce one. A refused handshake on a connection that opened is good
+// Two dials rather than one connection upgraded in place, because they answer
+// two different questions and conflating them loses the third answer. A
+// completed TLS handshake is strong evidence of TLS — a plaintext server
+// cannot produce one. A plain connection that opens where TLS failed is good
 // evidence of plaintext: an HTTP server answers a ClientHello with a 400 or
-// closes, neither of which parses as a ServerHello. A connection that never
-// opens says nothing at all, and is reported as such.
+// closes, neither of which parses as a ServerHello. And neither succeeding
+// says nothing at all about the origin, which is reported as undetermined
+// rather than guessed at — the backend may simply not be listening yet.
 //
-// InsecureSkipVerify because verification is not the question. The certificate
-// is almost always signed by the cluster CA or self-signed, and the tunnel
-// engine does not verify it either; asking whether it chains to a public root
-// would answer "no" for every legitimate in-cluster origin.
+// The fallback is a fresh dial on purpose. A server that rejects a handshake
+// has usually closed the connection, so reusing it would confirm nothing; a
+// second dial confirms the origin is actually reachable before concluding
+// anything about how it speaks.
+//
+// InsecureSkipVerify because verification is not the question being asked, and
+// answering it would answer "no" for every legitimate in-cluster origin: a
+// Service's certificate is signed by the cluster CA or self-signed, and neither
+// chains to a public root. The tunnel engine does not verify this hop either —
+// it cannot, for the same reason — so requiring a valid chain here would refuse
+// exactly the origins that do work.
+//
+// Each dial gets its own timeout, so a TLS attempt that stalls cannot starve
+// the fallback of the budget it needs to answer. Worst case is therefore twice
+// probeTimeout.
 func Probe(ctx context.Context, address string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
-	defer cancel()
+	tlsCtx, cancelTLS := context.WithTimeout(ctx, probeTimeout)
+	defer cancelTLS()
 
-	var dialer net.Dialer
-	conn, err := dialer.DialContext(ctx, "tcp", address)
+	dialer := tls.Dialer{
+		Config: &tls.Config{
+			InsecureSkipVerify: true, //nolint:gosec // detection, not authentication
+		},
+	}
+	if conn, err := dialer.DialContext(tlsCtx, "tcp", address); err == nil {
+		_ = conn.Close()
+		return consts.OriginSchemeTLS, nil
+	}
+
+	plainCtx, cancelPlain := context.WithTimeout(ctx, probeTimeout)
+	defer cancelPlain()
+
+	var plain net.Dialer
+	conn, err := plain.DialContext(plainCtx, "tcp", address)
 	if err != nil {
-		// Nothing is listening, or nothing answered in time. The backend may
-		// simply not be ready yet, so this is undetermined rather than
-		// plaintext.
 		return "", fmt.Errorf("dial %s: %w", address, err)
 	}
-	defer conn.Close() //nolint:errcheck // read-only probe
-
-	if deadline, ok := ctx.Deadline(); ok {
-		// A handshake against a server that accepts the connection and then
-		// says nothing would otherwise hang past the context.
-		_ = conn.SetDeadline(deadline)
-	}
-
-	tlsConn := tls.Client(conn, &tls.Config{
-		InsecureSkipVerify: true, //nolint:gosec // detection, not authentication
-	})
-	if err := tlsConn.HandshakeContext(ctx); err != nil {
-		// It answered, but not in TLS.
-		return consts.OriginScheme, nil
-	}
-	return consts.OriginSchemeTLS, nil
+	_ = conn.Close()
+	return consts.OriginScheme, nil
 }
 
 // originAddress is where the controller dials a Service to probe it: the same
