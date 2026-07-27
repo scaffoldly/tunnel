@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -35,7 +36,12 @@ func (i *installer) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("build client: %w", err)
 	}
-	return install(ctx, c)
+
+	owner, err := i.cfg.Owner(ctx, c)
+	if err != nil {
+		return fmt.Errorf("resolve owner: %w", err)
+	}
+	return install(ctx, c, owner)
 }
 
 // install creates one GatewayClass per provider, and leaves any that already
@@ -44,17 +50,17 @@ func (i *installer) Start(ctx context.Context) error {
 //
 // One provider failing does not stop the others: a cluster that can reach
 // Cloudflare but not us should still end up with a usable class.
-func install(ctx context.Context, c client.Client) error {
+func install(ctx context.Context, c client.Client, owner *metav1.OwnerReference) error {
 	var errs []error
 	for _, provider := range consts.InstalledProviders {
-		if err := installClass(ctx, c, provider); err != nil {
+		if err := installClass(ctx, c, provider, owner); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
 }
 
-func installClass(ctx context.Context, c client.Client, provider string) error {
+func installClass(ctx context.Context, c client.Client, provider string, owner *metav1.OwnerReference) error {
 	logger := log.FromContext(ctx).WithValues("gatewayclass", provider)
 
 	// No provider annotation: the name is the provider. (*Reconciler).provider
@@ -66,6 +72,11 @@ func installClass(ctx context.Context, c client.Client, provider string) error {
 			ControllerName: ControllerName,
 			Description:    ptr.To(consts.GatewayClassDescription),
 		},
+	}
+	// Owned by the namespace, so uninstalling collects the classes too. Only
+	// on create: an existing class keeps whatever ownership it already has.
+	if owner != nil {
+		class.OwnerReferences = []metav1.OwnerReference{*owner}
 	}
 
 	err := c.Create(ctx, class)
@@ -93,10 +104,15 @@ func installClass(ctx context.Context, c client.Client, provider string) error {
 	}
 }
 
-// scheme carries the Gateway API types the installer's own client needs; the
-// manager's scheme is not reachable from a Runnable.
+// scheme carries the types the installer's own client needs; the manager's
+// scheme is not reachable from a Runnable.
+//
+// clientgoscheme as well as the Gateway API types: resolving the owner reads a
+// Namespace and creates a SelfSubjectReview, and a client whose scheme does not
+// know a kind refuses to touch it.
 func scheme() *runtime.Scheme {
 	s := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(s))
 	utilruntime.Must(gatewayv1.Install(s))
 	return s
 }

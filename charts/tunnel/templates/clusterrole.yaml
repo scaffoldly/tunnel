@@ -13,6 +13,13 @@ capability brings its rules in the same commit as the code that calls them.
                                  no finalizer, because the tunnel lives in the
                                  controller process, not in the cluster.
 
+  namespaces (get)               Config.Owner reads the controller's own
+                                 namespace to build the ownerReference on the
+                                 classes --install creates, so uninstalling
+                                 collects them. Cluster-scoped dependents can
+                                 only have cluster-scoped owners, which rules
+                                 out the Deployment.
+
   services (get)                 (*Reconciler).port resolves a named port and
                                  confirms it is exposed. Read through the
                                  manager's *uncached* API reader, deliberately —
@@ -72,7 +79,7 @@ rules:
     resources: ["ingresses/status"]
     verbs: ["update"]
   - apiGroups: [""]
-    resources: ["services"]
+    resources: ["namespaces", "services"]
     verbs: ["get"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingressclasses"]

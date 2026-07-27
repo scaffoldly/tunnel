@@ -45,7 +45,7 @@ rules:
     resources: ["ingresses/status"]
     verbs: ["update"]
   - apiGroups: [""]
-    resources: ["services"]
+    resources: ["namespaces", "services"]
     verbs: ["get"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingressclasses"]

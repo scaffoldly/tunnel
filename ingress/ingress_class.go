@@ -31,7 +31,12 @@ func (i *installer) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("build client: %w", err)
 	}
-	return install(ctx, c)
+
+	owner, err := i.cfg.Owner(ctx, c)
+	if err != nil {
+		return fmt.Errorf("resolve owner: %w", err)
+	}
+	return install(ctx, c, owner)
 }
 
 // install creates one IngressClass per provider, and leaves any that already
@@ -40,17 +45,17 @@ func (i *installer) Start(ctx context.Context) error {
 //
 // One provider failing does not stop the others: a cluster that can reach
 // Cloudflare but not us should still end up with a usable class.
-func install(ctx context.Context, c client.Client) error {
+func install(ctx context.Context, c client.Client, owner *metav1.OwnerReference) error {
 	var errs []error
 	for _, provider := range consts.InstalledProviders {
-		if err := installClass(ctx, c, provider); err != nil {
+		if err := installClass(ctx, c, provider, owner); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
 }
 
-func installClass(ctx context.Context, c client.Client, provider string) error {
+func installClass(ctx context.Context, c client.Client, provider string, owner *metav1.OwnerReference) error {
 	logger := log.FromContext(ctx).WithValues("ingressclass", provider)
 
 	// No provider annotation: the name is the provider. (*Reconciler).provider
@@ -59,6 +64,11 @@ func installClass(ctx context.Context, c client.Client, provider string) error {
 	class := &networkingv1.IngressClass{
 		ObjectMeta: metav1.ObjectMeta{Name: provider},
 		Spec:       networkingv1.IngressClassSpec{Controller: ControllerName},
+	}
+	// Owned by the namespace, so uninstalling collects the classes too. Only
+	// on create: an existing class keeps whatever ownership it already has.
+	if owner != nil {
+		class.OwnerReferences = []metav1.OwnerReference{*owner}
 	}
 
 	err := c.Create(ctx, class)

@@ -38,7 +38,7 @@ func getClass(t *testing.T, c client.Client, name string) *networkingv1.IngressC
 func TestInstallCreatesAClassPerProvider(t *testing.T) {
 	c := fakeClient(t)
 
-	if err := install(context.Background(), c); err != nil {
+	if err := install(context.Background(), c, nil); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -72,7 +72,7 @@ func TestInstallIsIdempotent(t *testing.T) {
 	c := fakeClient(t)
 
 	for i := range 2 {
-		if err := install(context.Background(), c); err != nil {
+		if err := install(context.Background(), c, nil); err != nil {
 			t.Fatalf("install %d: %v", i+1, err)
 		}
 	}
@@ -93,7 +93,7 @@ func TestInstallLeavesForeignClassAlone(t *testing.T) {
 	// Not an error: another controller owning this name is a legitimate
 	// cluster, not a failed install. Returning an error would crash-loop the
 	// manager on a cluster we should simply stay out of.
-	if err := install(context.Background(), c); err != nil {
+	if err := install(context.Background(), c, nil); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -119,7 +119,7 @@ func TestInstallReportsCreateFailure(t *testing.T) {
 		}).
 		Build()
 
-	err := install(context.Background(), c)
+	err := install(context.Background(), c, nil)
 	if !errors.Is(err, boom) {
 		t.Fatalf("install error = %v, want it to wrap %v", err, boom)
 	}
@@ -140,7 +140,7 @@ func TestInstallReportsGetFailureOnConflict(t *testing.T) {
 		}).
 		Build()
 
-	err := install(context.Background(), c)
+	err := install(context.Background(), c, nil)
 	if !errors.Is(err, boom) {
 		t.Fatalf("install error = %v, want it to wrap %v", err, boom)
 	}
