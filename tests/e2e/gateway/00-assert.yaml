@@ -1,15 +1,28 @@
 # Mirrors the ingress suite. The controller mints these at startup via
-# --install, but only on a cluster serving the Gateway API — the suite installs
-# the CRDs before the chart for exactly this reason.
+# --install-gateway-classes, but only on a cluster serving the Gateway API —
+# and this suite installs no CRDs, so a class existing here at all is the proof
+# that --install-gateway-api put them there itself.
 #
 # spec.controllerName is the contract, derived by reflection from the gateway
 # package's import path and checked nowhere at build time.
+#
+# The Accepted condition is asserted because the controller published
+# Accepted=False for a whole release while Gateways on these very classes
+# provisioned and served. Gateway API requires the implementing controller to
+# publish it, and observedGeneration is what tells a current condition from a
+# stale one.
 apiVersion: gateway.networking.k8s.io/v1
 kind: GatewayClass
 metadata:
   name: tunnel.pizza
 spec:
   controllerName: github.com/scaffoldly/tunnel/gateway
+status:
+  conditions:
+    - type: Accepted
+      status: "True"
+      reason: Accepted
+      observedGeneration: 1
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: GatewayClass
@@ -17,3 +30,9 @@ metadata:
   name: api.trycloudflare.com
 spec:
   controllerName: github.com/scaffoldly/tunnel/gateway
+status:
+  conditions:
+    - type: Accepted
+      status: "True"
+      reason: Accepted
+      observedGeneration: 1

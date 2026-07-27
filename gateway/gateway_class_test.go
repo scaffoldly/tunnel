@@ -24,8 +24,16 @@ func gatewayClass(provider string, controller gatewayv1.GatewayController) *gate
 
 // newFakeClient builds a client carrying the Gateway API types, since they are
 // not in the client-go scheme.
+//
+// The GatewayClass status subresource is enabled so Status().Update behaves as
+// it does against a real API server rather than silently writing the whole
+// object.
 func newFakeClient(objs ...client.Object) client.WithWatch {
-	return fake.NewClientBuilder().WithScheme(scheme()).WithObjects(objs...).Build()
+	return fake.NewClientBuilder().
+		WithScheme(scheme()).
+		WithObjects(objs...).
+		WithStatusSubresource(&gatewayv1.GatewayClass{}).
+		Build()
 }
 
 func getClass(t *testing.T, c client.Client, name string) *gatewayv1.GatewayClass {

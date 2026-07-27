@@ -136,8 +136,8 @@ func installed(mgr ctrl.Manager) (bool, error) {
 //
 // Gateway API requires the implementing controller to publish an Accepted
 // condition; a class nobody accepts leaves every Gateway referencing it in
-// limbo with no explanation. Until provisioning exists this reports
-// Accepted=False rather than claiming a capability we do not have.
+// limbo with no explanation, and a conformant consumer may refuse to use it.
+// Gateways naming one of our classes are provisioned, so this accepts.
 type ClassReconciler struct {
 	client.Client
 }
@@ -159,24 +159,28 @@ func (r *ClassReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, nil
 	}
 
-	log.FromContext(ctx).Info("unimplemented", "gatewayclass", class.Name)
-
-	// Waiting is the Gateway API's reason for a class not yet usable, which is
-	// exactly the situation: the controller is present but cannot provision.
-	meta := metav1.Condition{
+	// The spec fixes one reason for Accepted=True, so it is read from the
+	// Gateway API's own constants rather than written down here.
+	//
+	// observedGeneration is not optional: without it a consumer cannot tell
+	// this condition from one left over before the last edit to the class.
+	// The class's name is the provider, so the message can say where the
+	// tunnels it accepts will come from.
+	accepted := metav1.Condition{
 		Type:               string(gatewayv1.GatewayClassConditionStatusAccepted),
-		Status:             metav1.ConditionFalse,
-		Reason:             string(gatewayv1.GatewayClassReasonWaiting),
-		Message:            consts.MsgUnimplemented,
+		Status:             metav1.ConditionTrue,
+		Reason:             string(gatewayv1.GatewayClassReasonAccepted),
+		Message:            fmt.Sprintf(consts.MsgClassAcceptedFmt, class.Name),
 		ObservedGeneration: class.Generation,
 	}
 
-	if !upsert(&class.Status.Conditions, meta) {
+	if !upsert(&class.Status.Conditions, accepted) {
 		return ctrl.Result{}, nil
 	}
 	if err := r.Status().Update(ctx, &class); err != nil {
 		return ctrl.Result{}, fmt.Errorf("update gatewayclass status: %w", err)
 	}
+	log.FromContext(ctx).Info("gatewayclass accepted", "gatewayclass", class.Name)
 	return ctrl.Result{}, nil
 }
 

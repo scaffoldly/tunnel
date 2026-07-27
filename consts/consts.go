@@ -84,10 +84,9 @@ const (
 	EventTypeNormal  = "Normal"
 	EventTypeWarning = "Warning"
 
-	ReasonUnimplemented = "Unimplemented"
-	ReasonTunnelReady   = "TunnelReady"
-	ReasonTunnelFailed  = "TunnelFailed"
-	ReasonUnsupported   = "Unsupported"
+	ReasonTunnelReady  = "TunnelReady"
+	ReasonTunnelFailed = "TunnelFailed"
+	ReasonUnsupported  = "Unsupported"
 
 	ActionProvision = "Provision"
 )
@@ -95,7 +94,6 @@ const (
 // Providers the controller can mint from. Each is a host: the tunnel is
 // requested from https://<host>/tunnel.
 const (
-	// ProviderTunnelPizza is used when nothing is annotated.
 	ProviderTunnelPizza = "tunnel.pizza"
 	// ProviderCloudflare is Cloudflare's own quick-tunnel endpoint, which
 	// libtunnel speaks natively. No account and no relationship with us —
@@ -104,10 +102,10 @@ const (
 	ProviderCloudflare = "api.trycloudflare.com"
 )
 
-// InstalledProviders is the set of classes --install creates, one per
-// provider. Each class is named for its provider and annotated with it, so
-// choosing a class is the whole configuration: the annotation cascade reads
-// the value off the class rather than inferring it from the name.
+// InstalledProviders is the set of classes the install flags create, one per
+// provider. Each class is named for its provider and carries nothing else, so
+// choosing a class is the whole configuration: the provider is inferred from
+// the class's name, and a second spelling could only disagree with it.
 //
 // ProviderTunnelPizza first, so it is the one `kubectl get ingressclass` shows
 // at the top.
@@ -122,23 +120,17 @@ var InstalledProviders = []string{ProviderTunnelPizza, ProviderCloudflare}
 // GatewayClassDescription is shown by `kubectl get gatewayclass`.
 const GatewayClassDescription = "Public reachability for this cluster via a tunnel provider."
 
-// Messages published while provisioning is unimplemented. Still used by the
-// Gateway API half, which does not provision yet.
+// Messages the controller publishes on the objects it claims, in conditions
+// where the API has them and in events where it does not.
 const (
-	// MsgUnimplemented is the bare statement, for status conditions.
-	MsgUnimplemented = "tunnel provisioning is not implemented yet"
-	// MsgUnimplementedFmt adds the provider that would have been used. Takes
-	// the provider host.
-	MsgUnimplementedFmt = MsgUnimplemented + "; would mint a tunnel from https://%s/tunnel"
-)
-
-// Messages published by the Ingress half, which does provision.
-const (
+	// MsgClassAcceptedFmt is the GatewayClass Accepted condition's message.
+	// Takes the provider host, which is the class's own name.
+	MsgClassAcceptedFmt = "Gateways on this class get a tunnel minted from https://%s/tunnel"
 	// MsgTunnelReadyFmt takes the public hostname and the provider host.
 	MsgTunnelReadyFmt = "tunnel ready at https://%s/ (minted from https://%s/tunnel)"
 	// MsgTunnelFailedFmt takes the error that ended the tunnel.
 	MsgTunnelFailedFmt = "tunnel failed: %v"
-	// MsgUnsupportedFmt takes the reason this Ingress cannot be served.
+	// MsgUnsupportedFmt takes the reason this object cannot be served.
 	MsgUnsupportedFmt = "cannot serve this object: %v"
 )
 
