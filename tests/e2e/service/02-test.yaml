@@ -1,6 +1,7 @@
 # The assertions kuttl's YAML matching cannot make: that traffic actually
-# reaches the backend through the tunnel, that a field is *absent*, and that an
-# object was not written to at all.
+# reaches the backend through the tunnel, and that a field is *absent*.
+#
+# The annotation trigger has its own suite, tests/e2e/service-annotate.
 #
 # One script per claim, so a failure names which one broke.
 apiVersion: kuttl.dev/v1beta1
@@ -35,16 +36,3 @@ commands:
       ing=$(kubectl get ingress nginx-tunnel-pizza -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
       test -n "$ing" || { echo "child ingress published no hostname" >&2; exit 1; }
       test "$svc" = "$ing" || { echo "service says '$svc', child says '$ing'" >&2; exit 1; }
-
-  # The annotation path writes NOTHING to the Service. This is half of decision
-  # 2 and it regresses silently: a status write here would be rejected by the
-  # API server, but an annotation would succeed and nobody would notice.
-  #
-  # Exactly one annotation, the one 02-annotate.yaml added. The kubernetes
-  # Service ships with none of its own.
-  - script: |
-      status=$(kubectl get service kubernetes -n default -o jsonpath='{.status.loadBalancer.ingress}')
-      test -z "$status" || { echo "status.loadBalancer.ingress on the annotated service = '$status', want empty" >&2; exit 1; }
-      count=$(kubectl get service kubernetes -n default -o go-template='{{ len .metadata.annotations }}')
-      test "$count" = "1" || { echo "annotations on the annotated service = $count, want only the user's own" >&2; exit 1; }
-      kubectl get service kubernetes -n default -o jsonpath='{.metadata.annotations.tunnel\.pizza/tunnel}' | grep -qx true

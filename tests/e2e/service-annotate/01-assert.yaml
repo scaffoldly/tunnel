@@ -28,3 +28,14 @@ spec:
       name: kubernetes
       port:
         number: 443
+status:
+  # The ports are written only alongside a non-empty hostname, so asserting
+  # them makes this step wait until the tunnel is actually up — which the curl
+  # in the next step needs, and which the Ingress existing does not imply.
+  loadBalancer:
+    ingress:
+      - ports:
+          - port: 80
+            protocol: TCP
+          - port: 443
+            protocol: TCP

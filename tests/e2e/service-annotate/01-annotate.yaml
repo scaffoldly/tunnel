@@ -10,10 +10,16 @@
 # WHAT THIS COSTS, AND WHY THE LAST STEP MATTERS
 #
 # The child Ingress mints a real, public tunnel, because minting is triggered
-# by the child existing and not by what this test asserts. 04-unannotate.yaml
+# by the child existing and not by what this test asserts. 03-unannotate.yaml
 # removes the annotation, which deletes the child and tears the tunnel down at
 # once rather than leaving it up until the API server's garbage collector gets
 # to it.
+#
+# This is its own suite rather than a step of tests/e2e/service so it can be
+# run, skipped and reasoned about on its own — it is the only test in the tree
+# that touches an object it did not create:
+#
+#   kubectl kuttl test --test service-annotate
 #
 # A FAILING RUN NEVER REACHES THAT STEP. kuttl aborts a test at its first
 # failed step, and this annotation is on a pre-existing object in `default`, so

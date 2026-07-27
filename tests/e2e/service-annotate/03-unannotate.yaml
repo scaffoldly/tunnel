@@ -4,7 +4,7 @@
 # Service stays. Only explicit reconcile logic does that.
 #
 # It is also what tears down the tunnel this test opened to the API server —
-# see the note in 02-annotate.yaml about what happens when an earlier step
+# see the note in 01-annotate.yaml about what happens when an earlier step
 # fails and this one never runs.
 apiVersion: kuttl.dev/v1beta1
 kind: TestStep

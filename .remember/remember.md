@@ -309,9 +309,13 @@ is `# check=skip=CopyIgnoredFile`.
 
 ## The service e2e annotates the API server's own Service
 
-`tests/e2e/service/` has two cases. The `loadBalancerClass` one is an ordinary
-nginx fixture and carries the `status.loadBalancer` assertions. The annotation
-one annotates **`kubernetes` in `default`** — the API server's own Service —
+Two suites, deliberately separate. `tests/e2e/service/` is the
+`loadBalancerClass` case: an nginx fixture carrying the `status.loadBalancer`
+assertions. `tests/e2e/service-annotate/` is the annotation case, split out so
+it can be run and skipped on its own (`kubectl kuttl test --test
+service-annotate`) because it is the only test in the tree that touches an
+object it did not create: it annotates **`kubernetes` in `default`** — the API
+server's own Service —
 because a fixture Service is written for us and therefore proves nothing about
 annotating a Service you already have. Christian decided this after being told
 what it costs.
@@ -320,7 +324,7 @@ What it costs: a real public tunnel is minted fronting the kube-apiserver,
 because minting is triggered by the child Ingress existing and not by what the
 test asserts. Two things bound it.
 
-- `04-unannotate.yaml` removes the annotation as the last step, which deletes
+- `03-unannotate.yaml` removes the annotation as the last step, which deletes
   the child and tears the tunnel down at once.
 - **A failing run never reaches that step.** kuttl aborts at the first failed
   step, and the annotation is on a pre-existing object in `default`, so kuttl's
@@ -328,10 +332,10 @@ test asserts. Two things bound it.
   is deleted afterwards, which cancels every tunnel context — and that backstop
   **does not apply under `--skip-delete`**, which is exactly the flag you are
   using when debugging a failure here. The comment saying so is in
-  `02-annotate.yaml`, where someone debugging will actually read it.
+  `01-annotate.yaml`, where someone debugging will actually read it.
 
-**The tunnel does not carry traffic, and that was measured rather than
-assumed.** `consts.OriginScheme` is `http` and the `kubernetes` Service's only
+**The tunnel carries traffic to the API server, which then refuses it — and
+that is asserted, not assumed.** `consts.OriginScheme` is `http` and the `kubernetes` Service's only
 port is 443 speaking TLS, so the origin is `http://kubernetes.default.svc:443`.
 From inside the cluster that returns `HTTP/1.0 400 Bad Request` with the body
 `Client sent an HTTP request to an HTTPS server.` — every request through the
@@ -340,8 +344,24 @@ tunnel fails at the origin. For contrast `https://` to the same port answers
 This materially reduces what the test exposes, and it is a different risk than
 the one the exposure was accepted against.
 
-Four real tunnels per full run now, not two: ingress and gateway one each, the
-service suite two.
+The suite **asserts exactly that**, at Christian's request: it curls
+`https://<tunnel>/healthz` and requires a `400` carrying that body. The 400 is
+the proof — the bytes crossed the tunnel, reached the API server and came
+back, which a `502` or `530` from the edge would not show. Asserting `ok`
+instead would require the controller to dial TLS origins: a change to
+`consts.OriginScheme` and a deliberate decision about exposing an API server,
+not a test change.
+
+Four real tunnels per full run now, not two: ingress, gateway and service one
+each, plus service-annotate's.
+
+**A kuttl layout trap, caught only because the run output was read rather than
+trusted:** each `testDirs` entry is a directory *of* tests — every immediate
+subdirectory becomes one suite. An entry pointing straight at step files logs
+`testsuite: ./tests/service-annotate/ has 0 tests` and **still exits 0**, so
+the suite silently does not run and the overall result is still PASS. That is
+why `service-annotate` lives under `tests/e2e/` rather than at
+`tests/service-annotate/`.
 
 ## e2e: kuttl, `make test-e2e`, both suites green
 

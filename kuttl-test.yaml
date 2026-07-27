@@ -5,6 +5,10 @@
 # something to attach to while debugging.
 apiVersion: kuttl.dev/v1beta1
 kind: TestSuite
+# Each entry is a directory *of* tests, not a test: every immediate
+# subdirectory becomes one suite. A path pointing straight at step files
+# registers as "has 0 tests" and is skipped silently, which is why
+# service-annotate lives here rather than at tests/service-annotate.
 testDirs:
   - ./tests/e2e/
 startKIND: true
@@ -19,11 +23,10 @@ timeout: 180
 # them together multiplies the concurrent load for no wall-clock gain — the
 # mint is the long pole either way.
 #
-# Four tunnels per run, not two: ingress and gateway mint one each, and the
-# service suite mints two — one for the type: LoadBalancer fixture and one for
-# the annotated `kubernetes` Service, which fronts the API server's own
-# Service. See tests/e2e/service/02-annotate.yaml for what that costs and how
-# it is torn down.
+# Four tunnels per run, not two: ingress, gateway and service mint one each,
+# and service-annotate mints one fronting the API server's own Service. See
+# tests/e2e/service-annotate/01-annotate.yaml for what that costs and how it is
+# torn down.
 parallel: 1
 
 commands:
