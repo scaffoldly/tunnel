@@ -96,14 +96,33 @@ func TestProviders(t *testing.T) {
 			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "false"}, httpPort),
 		},
 		{
-			name: "True is true",
-			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "True"}, httpPort),
-			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme}},
+			// Legal as a label value, and a thing people type. It is an error
+			// rather than a guess: reading it as on is how a typo becomes a
+			// tunnel nobody meant, reading it as off is how one silently fails
+			// to appear.
+			name:    "True is not true",
+			svc:     svc(map[string]string{"tunnel.pizza/tunnel": "True"}, httpPort),
+			wantErr: `annotation tunnel.pizza/tunnel="True": must be "true", "ingress", "gateway" or "none"`,
 		},
 		{
-			name: "the value is case-insensitive",
-			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "Ingress"}, httpPort),
-			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme}},
+			name:    "yes is an error, not an on",
+			svc:     svc(map[string]string{"tunnel.pizza/tunnel": "yes"}, httpPort),
+			wantErr: `must be "true", "ingress", "gateway" or "none"`,
+		},
+		{
+			name:    "1 is an error, not an on",
+			svc:     svc(map[string]string{"tunnel.pizza/tunnel": "1"}, httpPort),
+			wantErr: `must be "true", "ingress", "gateway" or "none"`,
+		},
+		{
+			name:    "enabled is an error, not an on",
+			svc:     svc(map[string]string{"tunnel.pizza/tunnel": "enabled"}, httpPort),
+			wantErr: `must be "true", "ingress", "gateway" or "none"`,
+		},
+		{
+			name:    "Ingress is not ingress either",
+			svc:     svc(map[string]string{"tunnel.pizza/tunnel": "Ingress"}, httpPort),
+			wantErr: `must be "true", "ingress", "gateway" or "none"`,
 		},
 		{
 			name: "gateway asks for the Gateway branch",
@@ -431,5 +450,27 @@ func equality(a, b *corev1.Service) bool {
 func TestKnownProvidersAreTheInstalledOnes(t *testing.T) {
 	if !slices.Equal(known, consts.InstalledProviders) {
 		t.Errorf("known = %v, want consts.InstalledProviders %v", known, consts.InstalledProviders)
+	}
+}
+
+// TestTrueIsAGenuineAliasForIngress: "true" exists so the first thing a person
+// guesses works, which it only does if it takes exactly the same path. A suite
+// that only ever exercised "ingress" would not notice the two diverging.
+func TestTrueIsAGenuineAliasForIngress(t *testing.T) {
+	fromTrue, err := providers(svc(map[string]string{"tunnel.pizza/tunnel": "true"}, httpPort), known)
+	if err != nil {
+		t.Fatalf("true: %v", err)
+	}
+	fromIngress, err := providers(svc(map[string]string{"tunnel.pizza/tunnel": "ingress"}, httpPort), known)
+	if err != nil {
+		t.Fatalf("ingress: %v", err)
+	}
+
+	if !slices.Equal(fromTrue, fromIngress) {
+		t.Errorf("true resolved to %v, ingress to %v — they must be indistinguishable", fromTrue, fromIngress)
+	}
+	// And specifically: the resolved API is the branch, never the input sugar.
+	if len(fromTrue) != 1 || fromTrue[0].api != apiIngress {
+		t.Errorf("true resolved to api %q, want %q", fromTrue[0].api, apiIngress)
 	}
 }

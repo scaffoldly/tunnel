@@ -374,7 +374,14 @@ func parseProtocol(value string) (string, error) {
 // parseTunnel reads what {provider}/tunnel says: which API to serve the tunnel
 // through, or that there should not be one.
 func parseTunnel(value string) (childAPI, bool, error) {
-	switch lowered := strings.ToLower(value); lowered {
+	// Exact, not case-folded. "True" and "TRUE" are legal label values and are
+	// things people type, and each one is a clear error rather than a guess in
+	// either direction: reading "True" as on is how a typo becomes a tunnel
+	// nobody meant to create, and reading it as off is how a tunnel silently
+	// fails to appear. The error names all four accepted values, which is a
+	// shorter path to working than a fold that covers some spellings and not
+	// others.
+	switch value {
 	case string(apiIngress), tunnelTrue:
 		return apiIngress, true, nil
 	case string(apiGateway):

@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -1037,5 +1038,34 @@ func TestReconcileDoesNotListGatewayKindsWithoutTheCRDs(t *testing.T) {
 	}
 	if names := ingressNames(t, c); len(names) != 1 {
 		t.Errorf("ingresses = %v, want the Ingress branch to work regardless", names)
+	}
+}
+
+// TestTrueAndIngressProduceIdenticalChildren closes the other half of the
+// alias: identical resolution is not identical output if anything downstream
+// reads the raw value. Names, specs and annotations all have to match.
+func TestTrueAndIngressProduceIdenticalChildren(t *testing.T) {
+	build := func(value string) *networkingv1.Ingress {
+		t.Helper()
+		r, c, _ := reconciler(t, annotated(map[string]string{"tunnel.pizza/tunnel": value}))
+		if _, err := r.Reconcile(context.Background(), reconcileRequest()); err != nil {
+			t.Fatalf("%s: Reconcile() error = %v", value, err)
+		}
+		return getIngress(t, c, "web-tunnel-pizza")
+	}
+
+	fromTrue, fromIngress := build("true"), build("ingress")
+
+	if !apiequality.Semantic.DeepEqual(fromTrue.Spec, fromIngress.Spec) {
+		t.Errorf("specs differ:\n true    %+v\n ingress %+v", fromTrue.Spec, fromIngress.Spec)
+	}
+	if fromTrue.Name != fromIngress.Name {
+		t.Errorf("names differ: %q vs %q", fromTrue.Name, fromIngress.Name)
+	}
+	if !apiequality.Semantic.DeepEqual(fromTrue.Annotations, fromIngress.Annotations) {
+		t.Errorf("annotations differ:\n true    %v\n ingress %v", fromTrue.Annotations, fromIngress.Annotations)
+	}
+	if !apiequality.Semantic.DeepEqual(fromTrue.Labels, fromIngress.Labels) {
+		t.Errorf("labels differ:\n true    %v\n ingress %v", fromTrue.Labels, fromIngress.Labels)
 	}
 }
