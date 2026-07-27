@@ -5,7 +5,7 @@ Where the two overlap the definition wins, **except where this file says the
 definition is out of date**. The one place that mattered — the provider
 annotation cascade — has since been corrected in the definition itself.
 
-## State — HEAD `9f7e5d0`, pushed, CI green, working tree clean
+## State — HEAD `5c40e97`, pushed, CI green, working tree clean
 
 In order: `1b90a58` Ingress provisioning with libtunnel, `28b8f31`
 served ports in status, `21e9ba0` ownerReferences on installed classes,
@@ -13,7 +13,8 @@ served ports in status, `21e9ba0` ownerReferences on installed classes,
 bundled Gateway API CRDs + `--install` split into three, `b4143ff` CRD bundle
 generated from the module, `6f572e3` Gateway provisioning, `502deca`
 GatewayClass Accepted + its tests, `5250558` the prose sweep and the
-regenerated manifest, `9f7e5d0` GatewayClass SupportedVersion.
+regenerated manifest, `9f7e5d0` GatewayClass SupportedVersion, `5c40e97`
+provider resolution for annotation-driven tunnels (phase 1).
 
 **Both halves provision.** Ingress and Gateway each mint a real tunnel and
 publish the hostname — Ingress to `status.loadBalancer.ingress[].hostname`,
@@ -21,8 +22,10 @@ Gateway to `status.addresses[]` (type `Hostname`). Nothing is a stub any more,
 and as of `5250558` nothing in the tree says otherwise: the eleven-item list
 of wrong prose that used to live at the bottom of this file is cleared.
 
-Ten packages: `.`, `config`, `consts`, `gateway`, `healthz`, `ingress`,
-`metrics`, `readyz`, `tunnels`, plus `charts/tunnel`. `tunnels` is new — the
+Eleven packages: `.`, `config`, `consts`, `gateway`, `healthz`, `ingress`,
+`metrics`, `readyz`, `service`, `tunnels`, plus `charts/tunnel`. `service` is
+newest and is not wired to anything yet — see the phase 1 section below.
+`tunnels` came before it — the
 tunnel store moved there out of `ingress/tunnel.go`, because both halves need
 it and neither owns it. `tunnels.Dial` takes a `metav1.Object`, so an
 `IngressClass` and a `GatewayClass` both satisfy it; the class's **name** is the
@@ -48,6 +51,125 @@ disagree.
 The invariant — provider is inferred, never a flag — still holds. Only the
 mechanism moved. Do not "restore" the cascade; the deleted annotation code is
 not coming back.
+
+## Annotation-driven tunnels: what phase 0 settled against a real cluster
+
+The design is `designs/annotation-driven-tunnels.md` in the coordinator's repo,
+not this one. Phase 0 was one factual question and it came back **no**, which
+the design did not expect. Everything here was observed on kind, server
+**v1.35.0**, not read out of the source.
+
+- **`status.loadBalancer.ingress[]` cannot be written to a Service whose
+  `spec.type` is not `LoadBalancer`.** `kubectl patch --subresource=status`
+  against a ClusterIP *and* a NodePort Service both fail with
+  `status.loadBalancer.ingress: Forbidden: may only be used when 'spec.type' is
+  'LoadBalancer'`. The same patch on a `type: LoadBalancer` Service succeeds.
+- **There is no version where the alternative worked.** The validation is
+  kubernetes/kubernetes#119789, milestone **v1.29**. Its gate
+  `AllowServiceLBStatusOnNonLB` was off by default then and is gone now — the
+  1.35 apiserver publishes 218 `kubernetes_feature_enabled` series and none
+  matches `ServiceLB`. And per that PR, *before* 1.29 the write was accepted
+  but any `metadata` or `spec` update wiped it. So the choice was never
+  "works on old clusters, fails on new" — it was "fails loudly" or "fails
+  silently".
+- The display claim the design rests on is confirmed: `kubectl get svc` shows
+  `<none>` under EXTERNAL-IP for ClusterIP and NodePort Services regardless of
+  status, and the hostname for a `type: LoadBalancer` one.
+
+Christian is deciding what replaces the "backfill always" half of decision 2;
+it lands in phase 2, not phase 1. The narrow reading — mirror the hostname to
+an annotation on every path, backfill status only on the `loadBalancerClass`
+path, which is `type: LoadBalancer` by definition — costs the user nothing
+visible, but it is his call.
+
+Adjacent facts from the same session, expensive to rediscover:
+
+- A `metadata` or `spec` update on a **LoadBalancer** Service does *not* clobber
+  `status.loadBalancer`. Annotating one and then adding a port both left the
+  hostname in place, so writing the mirror annotation cannot wipe the status
+  entry and the two writes need no ordering.
+- Flipping `type` from `LoadBalancer` back to `ClusterIP` while status is set is
+  **accepted** and clears status automatically. A user downgrading a Service is
+  not a case the controller has to unwedge.
+- `allocateLoadBalancerNodePorts: false` renders EXTERNAL-IP exactly the same
+  and allocates no node port — `80/TCP` rather than `80:31262/TCP`. The
+  documented tidy-up works and is still the user's to set, not ours.
+- `spec.loadBalancerClass` is **forbidden unless `type` is `LoadBalancer`**
+  (`Forbidden: may only be used when 'type' is 'LoadBalancer'`) and **immutable**
+  once set — both adding it to an existing LoadBalancer Service and changing it
+  on one that has it fail with `may not change once set`.
+- Dotted class values are legal: both `tunnel.pizza` and `api.trycloudflare.com`
+  are accepted as `loadBalancerClass`. It is validated as a qualified name, and
+  dots are legal in the name half, so the provider vocabulary needs no mangling.
+
+## Phase 1: `service` resolves, and nothing calls it yet
+
+`service/providers.go` is one pure function, `providers(*corev1.Service, known
+[]string) ([]resolved, error)`, plus its tests. **No controller, no informer, no
+RBAC, and no caller** — that is phase 2, and the metadata-only watch the design
+insists on is the thing to get right there.
+
+The shape worth keeping: both triggers are read in **one pass over the whole
+Service**, into one map keyed by provider. Deduplication is on provider, not on
+trigger, and it is free that way and awkward any other way. Output is sorted by
+provider, because phase 2's child object names derive from it and an unstable
+order orphans a child per reconcile.
+
+`known` is an argument rather than a package-level read of
+`consts.InstalledProviders`, because the honest vocabulary is "classes in this
+cluster naming this controller" — a cluster read a pure function must not do.
+Widening it is a change to the caller.
+
+Decisions in here that will look arbitrary later:
+
+- **An unknown annotation prefix is an error; an unknown `loadBalancerClass` is
+  silently not ours.** The asymmetry is the point. Nothing else in the ecosystem
+  defines a `{prefix}/tunnel` key, so an unrecognised one is a typo and saying
+  nothing looks identical to the controller being down. `loadBalancerClass` is
+  how a Service says which implementation owns it, so an unrecognised value
+  names MetalLB or a cloud provider, and erroring would put a warning on every
+  foreign LoadBalancer Service in the cluster.
+- **An explicit `false` beats every trigger**, including `loadBalancerClass`.
+  Since that field is immutable, an annotation is the only way to turn it off
+  without deleting the Service.
+- **Only TCP ports are candidates.** A tunnel carries HTTP over TCP, so a UDP
+  port is not a worse choice, it is not a choice — one HTTP port beside a UDP
+  one resolves rather than being refused for ambiguity it does not have. This
+  is slightly beyond what decision 3 says; it only ever turns a refusal into a
+  correct answer. Flagged to the coordinator, not smuggled.
+- **A `{provider}/tunnel-api` naming no tunnel is an error**, unless the same
+  provider also carries an explicit `false` — keeping the api line while
+  flipping the switch off is what the explicit off is for.
+- `spec.loadBalancerClass` is read only when `spec.type` is `LoadBalancer`. The
+  other combination is unreachable (see phase 0 above) and the check is there to
+  say so, not to defend against it.
+
+**`errUnsupported` now lives in `consts` as `ErrUnsupported`.** `ingress` and
+`gateway` keep a one-line local alias so their call sites read unqualified, and
+`errors.Is` holds across all three — a caller composing a Service with a child
+Ingress should not have to know which package's sentinel to test. Nothing in
+`service` can be transient: it reads one object and nothing else, so every error
+it returns wraps the sentinel and a caller reports and drops rather than
+requeueing.
+
+**Twenty-one mutations, all killed** (`service/providers_test.go`): order not
+sorted; the class keyed separately from the annotation so the two triggers stop
+deduplicating; explicit off ignored; `false` treated as on; unknown provider
+ignored; unparseable value treated as off; prefixless annotation ignored;
+`https` preferred over `http`; first port taken instead of the preferred name;
+ambiguous ports resolved instead of refused; protocol filter dropped; port
+resolved for a Service that asked for nothing; orphaned `tunnel-api` not
+reported; `tunnel-api` beside an off wrongly reported as orphaned; annotations
+scanned in map order; `loadBalancerClass` read regardless of type; a foreign
+class claimed as ours; default API flipped to gateway; unknown `tunnel-api`
+defaulted instead of refused; errors no longer wrapping `ErrUnsupported`; and
+the mirrored `{provider}/hostname` annotation read as the trigger. The last one
+is the one to keep: phase 2 writes that annotation, and a controller that reads
+its own output as input loops.
+
+Two tests exist only to survive Go's randomised map iteration —
+`TestProvidersOrderIsStable` and `TestProvidersReportsTheSameErrorEveryTime`,
+both 100 iterations. The table alone would flake rather than fail.
 
 ## Origin resolution is where the two halves genuinely differ
 
