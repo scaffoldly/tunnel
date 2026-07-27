@@ -2,22 +2,24 @@
 
 Invariants are in the agent definition — this file is state and gotchas only.
 Where the two overlap the definition wins, **except where this file says the
-definition is out of date**; one such place is marked below and it matters.
+definition is out of date**. The one place that mattered — the provider
+annotation cascade — has since been corrected in the definition itself.
 
-## State — HEAD `6f572e3`, pushed, working tree clean
+## State — HEAD `5250558`, pushed, CI green, working tree clean
 
-Tonight, in order: `1b90a58` Ingress provisioning with libtunnel, `28b8f31`
+In order: `1b90a58` Ingress provisioning with libtunnel, `28b8f31`
 served ports in status, `21e9ba0` ownerReferences on installed classes,
 `4a18f9f` kuttl scaffold + `.dockerignore`, `a93e3e8` Ingress e2e, `1cf85ed`
 bundled Gateway API CRDs + `--install` split into three, `b4143ff` CRD bundle
-generated from the module, `6f572e3` Gateway provisioning.
+generated from the module, `6f572e3` Gateway provisioning, `502deca`
+GatewayClass Accepted + its tests, `5250558` the prose sweep and the
+regenerated manifest.
 
 **Both halves provision.** Ingress and Gateway each mint a real tunnel and
 publish the hostname — Ingress to `status.loadBalancer.ingress[].hostname`,
-Gateway to `status.addresses[]` (type `Hostname`). Nothing is a stub any more.
-Anything in the tree that still says "stub", "scaffold" or "Unimplemented" is
-prose that did not keep up; the list is at the bottom and it includes the
-manifest users apply.
+Gateway to `status.addresses[]` (type `Hostname`). Nothing is a stub any more,
+and as of `5250558` nothing in the tree says otherwise: the eleven-item list
+of wrong prose that used to live at the bottom of this file is cleared.
 
 Ten packages: `.`, `config`, `consts`, `gateway`, `healthz`, `ingress`,
 `metrics`, `readyz`, `tunnels`, plus `charts/tunnel`. `tunnels` is new — the
@@ -26,25 +28,26 @@ it and neither owns it. `tunnels.Dial` takes a `metav1.Object`, so an
 `IngressClass` and a `GatewayClass` both satisfy it; the class's **name** is the
 provider host, and that is the whole contract with libtunnel.
 
-## The provider contract changed — the definition is stale on this
+## The provider contract — the annotation cascade is gone for good
 
 There is no `tunnel.pizza/provider` annotation and no `consts.DefaultProvider`.
-Both were deleted in `1b90a58`. The definition's "annotation on the resource,
-then on its class, then `consts.DefaultProvider`" describes code that no longer
-exists.
+Both were deleted in `1b90a58`. The agent definition described a three-step
+cascade for a while after that; it has since been corrected, and the correction
+is the authority. If a cascade ever reappears in a prompt, it is a stale copy.
 
-What is true now: **the class is the whole configuration.** A class is *named*
-for the provider host it mints from, and `--install` creates one per provider
-(`consts.InstalledProviders` — `tunnel.pizza`, then `api.trycloudflare.com`).
+What is true: **the class is the whole configuration.** A class is *named*
+for the provider host it mints from, and the class install flags create one per
+provider (`consts.InstalledProviders` — `tunnel.pizza`, then
+`api.trycloudflare.com`).
 `(*Reconciler).class` in each half resolves the named class, checks
 `spec.controller` / `spec.controllerName` against `ControllerName`, and returns
 it; `class.Name` is then the provider. There is deliberately no annotation on
 the installed classes, because the name already says it and two spellings can
 disagree.
 
-The definition's actual invariant — provider is inferred, never a flag — still
-holds. Only the mechanism moved. Do not "restore" the cascade on the strength
-of the definition alone; ask first.
+The invariant — provider is inferred, never a flag — still holds. Only the
+mechanism moved. Do not "restore" the cascade; the deleted annotation code is
+not coming back.
 
 ## Origin resolution is where the two halves genuinely differ
 
@@ -146,7 +149,7 @@ and https.
   for the zone would make it a 301 with no body and fail here. That was a
   dashboard setting with nothing recording it.
 
-### Traps that cost real time tonight
+### Traps that cost real time
 
 - **Never pipe `make test-e2e` into `head`.** It takes SIGPIPE and orphans the
   kind cluster; the next run dies with `KIND is already running`. Recovery:
@@ -167,13 +170,20 @@ and https.
   nothing. `go mod tidy` leaves `go.mod`/`go.sum` unchanged. `actionlint` clean.
 - `docker buildx build --platform linux/amd64,linux/arm64 --output=type=cacheonly .`
   — succeeds, cross-compiled from one native build stage via TARGETOS/TARGETARCH.
-- `make test-e2e` — `PASS: kuttl (71.39s)`, `gateway (15.61s)`, `ingress (19.63s)`.
-  Real hostnames minted (`respective-coyote.tunneled.pizza`,
-  `mere-earthworm.tunneled.pizza`) and both schemes served nginx.
+- `make test-e2e` — `PASS: kuttl (83.14s)`, `gateway (21.73s)`, `ingress (20.67s)`,
+  including the new GatewayClass `Accepted` assert. Real tunnels minted and both
+  schemes served nginx. An earlier run before the sweep: `71.39s` / `15.61s` /
+  `19.63s`.
+- The negative run matters as much: with `00-assert` deliberately set back to
+  `False`/`Waiting`, `kubectl kuttl test --test gateway` fails in `step 0` with
+  `.status.conditions.status: value mismatch, expected: False != actual: True`
+  and never reaches the mint. Cheap to repeat, costs the provider nothing.
 - `curl -sI -H 'Accept: */*' https://tunnel.pizza` → `307` →
   `raw.githubusercontent.com/scaffoldly/tunnel/main/install.yaml`, which returns
   `200`, `cache-control: max-age=300`. The served body is byte-identical to
-  `install.yaml` on disk (4132 bytes).
+  `install.yaml` on disk, re-checked after `5250558` went out.
+- CI run `30240811031` on `5250558`: `check` and `publish` both green, including
+  "Verify install.yaml matches the chart".
 
 The old open question — whether the cut-down RBAC is actually sufficient — is
 **closed by observation**. The e2e installs the chart's real ClusterRole and
@@ -200,55 +210,53 @@ CI ignores `**.md`, `.remember/**` and `LICENSE*` on both `push` and
 `pull_request`, so a docs-only or handoff-only commit produces **no run at all**
 — not a green one. Do not go looking for it.
 
-## Prose that is now wrong, in rough order of who it hurts
+## The prose sweep is done — how it was wrong, so it does not recur
 
-This is the actively-misleading category, not merely stale. All of it says the
-Gateway half does not work, or documents the deleted annotation.
+Eleven places said the Gateway half did not work, or documented the deleted
+annotation; all eleven are fixed in `502deca` and `5250558`. The pattern is
+worth keeping: **every one of them was written in the same commit as code that
+was true at the time, and none of them had a test.** Prose about a capability
+ages the moment the capability lands, and nothing in this repo checks it.
 
-1. `charts/tunnel/templates/_helpers.tpl`, `tunnel.header` — "Gateway API is not
-   implemented yet: matching Gateways get an Unimplemented event and no tunnel."
-   This renders into `install.yaml` and is **served at https://tunnel.pizza and
-   displayed inline on the hero page**. Widest blast radius of anything here.
-2. `README.md` — "**Gateway API is still a stub**"; the whole "Providers"
-   section (three-step annotation cascade); the "Install flag" section (singular
-   `--install`, which no longer exists).
-3. `charts/tunnel/templates/NOTES.txt` — "Gateways are still a scaffold"; the
-   `tunnel.pizza/provider` override at the end.
-4. `charts/tunnel/templates/serviceaccount.yaml` — the "Provider override, on
-   the resource or on its class" block.
-5. `main.go` package doc — "The Gateway API half is still a stub". (Its second
-   clause, that GatewayClasses report `Accepted=False`, is still true — below.)
-6. `ingress/ingress.go` package doc — "resolve the provider host from the
-   annotation cascade".
-7. `consts/consts.go` on `InstalledProviders` — "the annotation cascade reads the
-   value off the class rather than inferring it from the name". Exactly inverted:
-   it infers from the name.
-8. `ingress/ingress_class.go` and `gateway/gateway_class.go`, both at the class
-   literal — "(*Reconciler).provider falls back to the class's own name". There
-   is no `provider` method any more; it is `class()`.
-9. `charts/tunnel/templates/clusterrole.yaml` — the `ingressclasses` note says
-   classes resolve to "a controller and a provider annotation"; the
-   `gatewayclasses/status` note says "until provisioning exists".
-10. `tests/e2e/gateway/00-assert.yaml` — "the suite installs the CRDs before the
-    chart for exactly this reason". It deliberately does not; that is the point
-    of the test.
-11. `consts.ReasonUnimplemented` and `consts.MsgUnimplementedFmt` are dead — no
-    references outside `consts`.
+The rule that replaced them all, used verbatim wherever an annotation used to
+be documented: *a class is named for the host it mints from, and choosing a
+class is the whole configuration.* Reuse that sentence rather than inventing a
+paraphrase.
 
-## Two real gaps
+`tunnel.header` in `charts/tunnel/templates/_helpers.tpl` is the one to be
+careful with — it renders into `install.yaml`, is served from
+https://tunnel.pizza and shown inline on the hero page, and reaches every new
+`kubectl apply` within 300s of a push to main. Current wording states two
+things a user needs before applying and neither of which was there before: a
+Gateway takes its backend from the HTTPRoutes that name it (so it has no
+address until one exists), and the Gateway API CRDs are installed if they have
+none.
 
-**The GatewayClass still reports `Accepted=False` / `Waiting` / "tunnel
-provisioning is not implemented yet"** (`ClassReconciler.Reconcile`,
-`gateway/gateway.go`) while Gateways on that very class provision and serve.
-`kubectl describe gatewayclass tunnel.pizza` contradicts `kubectl get gateway`.
-Nothing catches it: the Gateway reconciler never reads the condition and no test
-asserts on it. Gateway API requires the implementing controller to publish
-`Accepted`, and publishing False when it works is arguably worse than not
-publishing — a conformant consumer may refuse the class. This is the first thing
-to fix, and it is a two-line change plus a test.
+## One real gap left, and one spec MUST not implemented
 
-**The gateway half has no unit tests for the code that provisions.**
-`gateway/` has `crds_test.go`, `gateway_class_test.go`, `reporter_test.go` — and
+**`SupportedVersion` is never published.** Gateway API says a controller that
+marks a GatewayClass `Accepted` MUST also set `SupportedVersion`
+(`gatewayv1.GatewayClassConditionStatusSupportedVersion`, reasons
+`SupportedVersion` / `UnsupportedVersion`). `502deca` deliberately did not add
+it: doing it honestly means reading the CRDs' `bundle-version` annotation at
+runtime and deciding a support policy against `bundledVersion`, which is a
+decision, not a two-line change. The RBAC already allows the read
+(`customresourcedefinitions` get/list/watch). Until it lands we are accepting
+classes without the companion condition the spec requires.
+
+The `Accepted` condition itself is now correct and guarded: `Accepted=True`,
+reason `Accepted`, `observedGeneration`, message naming the provider. Tests in
+`gateway/gateway_test.go` plus the gateway e2e `00-assert`. Both were checked
+by mutation, and the e2e one fails at step 0 before any tunnel is minted, so
+breaking it costs no provider load. **Assertions there are written against the
+literal `"Accepted"`, not `gatewayv1.GatewayClassReasonAccepted`** — an
+assertion phrased in the code's own constants would have passed just as
+happily against the `False`/`Waiting` condition that shipped for a release.
+`TestAcceptedConditionMatchesTheSpec` pins the literals to upstream.
+
+**The gateway half still has thin unit tests for the code that provisions.**
+`gateway/` has `crds_test.go`, `gateway_class_test.go`, `reporter_test.go` and
+now `gateway_test.go` — but the last covers `ClassReconciler` only. Still
 nothing for `Reconciler.Reconcile`, `origin.go` (`single`, `attaches`, `port`)
 or `routeParents`. The ingress half has seven reconcile tests plus
 `origin_test.go` and `class_test.go`; `tunnels` has six store tests.
