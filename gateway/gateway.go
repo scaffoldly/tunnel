@@ -79,7 +79,7 @@ func New(mgr ctrl.Manager, cfg config.Config) error {
 		}
 	}
 
-	ok, err := installed(mgr)
+	ok, err := Installed(mgr)
 	if err != nil {
 		return fmt.Errorf("detect gateway api: %w", err)
 	}
@@ -118,7 +118,17 @@ func New(mgr ctrl.Manager, cfg config.Config) error {
 }
 
 // installed reports whether the cluster serves the Gateway API group.
-func installed(mgr ctrl.Manager) (bool, error) {
+// Installed reports whether this cluster serves the Gateway API.
+//
+// Exported because the Service controller needs the same answer: it must not
+// register a watch on a kind the API server does not serve — controller-runtime
+// fails to *start* the manager if it does — and it must refuse a Service asking
+// for the Gateway branch rather than create children nothing will reconcile.
+//
+// One implementation rather than two, because two could disagree and the
+// disagreement would show up as a crash-loop on somebody's Ingress-only
+// cluster.
+func Installed(mgr ctrl.Manager) (bool, error) {
 	_, err := mgr.GetRESTMapper().RESTMapping(
 		schema.GroupKind{Group: gatewayv1.GroupName, Kind: "Gateway"},
 		gatewayv1.GroupVersion.Version,

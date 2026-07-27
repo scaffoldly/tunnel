@@ -1,0 +1,12 @@
+# kuttl fails the step if either of these still exists. This is the assertion
+# the switch is really about: the Gateway pair must be gone, not merely joined
+# by an Ingress.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: nginx-tunnel-pizza
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: nginx-tunnel-pizza

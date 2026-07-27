@@ -1,10 +1,13 @@
 package service
 
 import (
-	apivalidation "k8s.io/apimachinery/pkg/api/validation"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"strings"
 	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	apivalidation "k8s.io/apimachinery/pkg/api/validation"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // TestChildName pins the naming, which is the only handle the controller has
@@ -94,7 +97,7 @@ func TestChildNameSeparatesTruncatedProviders(t *testing.T) {
 // collectable when the Service goes, and what every delete is scoped by.
 func TestChildIsOwnedByTheService(t *testing.T) {
 	svc := annotated(nil)
-	ing := child(svc, resolved{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 8080}})
+	ing := ingressChildFor(svc, resolved{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 8080}})
 
 	if len(ing.OwnerReferences) != 1 {
 		t.Fatalf("ownerReferences = %+v, want exactly one", ing.OwnerReferences)
@@ -118,7 +121,7 @@ func TestChildIsOwnedByTheService(t *testing.T) {
 // no paths, no host matching. Anything more is the explicit Ingress the user
 // can graduate to.
 func TestChildCarriesNoTLSOrRules(t *testing.T) {
-	ing := child(annotated(nil), resolved{provider: "tunnel.pizza", api: apiIngress, port: servicePort{number: 80}})
+	ing := ingressChildFor(annotated(nil), resolved{provider: "tunnel.pizza", api: apiIngress, port: servicePort{number: 80}})
 
 	if len(ing.Spec.Rules) != 0 {
 		t.Errorf("rules = %+v, want none", ing.Spec.Rules)
@@ -142,7 +145,7 @@ func TestChildTargetsTheServiceItBelongsTo(t *testing.T) {
 	svc.Namespace = "other"
 	svc.Name = "api"
 
-	ing := child(svc, resolved{provider: "tunnel.pizza", api: apiIngress, port: servicePort{number: 8080}})
+	ing := ingressChildFor(svc, resolved{provider: "tunnel.pizza", api: apiIngress, port: servicePort{number: 8080}})
 
 	if ing.Namespace != "other" {
 		t.Errorf("namespace = %q, want other", ing.Namespace)
@@ -158,7 +161,7 @@ func TestChildTargetsTheServiceItBelongsTo(t *testing.T) {
 // TestChildPortIsTheResolvedOne guards against the child quietly pointing at
 // something port selection did not choose.
 func TestChildPortIsTheResolvedOne(t *testing.T) {
-	ing := child(annotated(nil), resolved{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "https", number: 8443}})
+	ing := ingressChildFor(annotated(nil), resolved{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "https", number: 8443}})
 
 	if got := ing.Spec.DefaultBackend.Service.Port.Number; got != 8443 {
 		t.Errorf("backend port = %d, want 8443", got)
@@ -170,7 +173,7 @@ func TestChildPortIsTheResolvedOne(t *testing.T) {
 // Service would resolve correctly and then reach nothing.
 func TestChildDeclaresTheProtocol(t *testing.T) {
 	for _, protocol := range []string{"http", "https"} {
-		ing := child(annotated(nil), resolved{
+		ing := ingressChildFor(annotated(nil), resolved{
 			provider: "tunnel.pizza", api: apiIngress,
 			port: servicePort{number: 8443}, protocol: protocol,
 		})
@@ -178,4 +181,10 @@ func TestChildDeclaresTheProtocol(t *testing.T) {
 			t.Errorf("child annotation = %q, want %q", got, protocol)
 		}
 	}
+}
+
+// ingressChildFor builds the Ingress branch's child the way children() does,
+// so a test never has to know the naming rule it is asserting against.
+func ingressChildFor(svc *corev1.Service, want resolved) *networkingv1.Ingress {
+	return ingressChild(svc, want, childName(svc.Name, want.provider))
 }

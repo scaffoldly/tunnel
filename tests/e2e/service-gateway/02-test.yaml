@@ -1,0 +1,21 @@
+# Traffic through the generated pair, from the public internet. One script per
+# scheme so a failure names which one broke; the edge answers plaintext on 80
+# rather than redirecting, deliberately, to match a Cloudflare quick tunnel.
+apiVersion: kuttl.dev/v1beta1
+kind: TestStep
+commands:
+  - script: |
+      host=$(kubectl get gateway nginx-tunnel-pizza -n "$NAMESPACE" -o jsonpath='{.status.addresses[0].value}')
+      test -n "$host" || { echo "no address published on gateway/nginx-tunnel-pizza" >&2; exit 1; }
+      curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "http://$host/" | grep -q 'Welcome to nginx'
+
+  - script: |
+      host=$(kubectl get gateway nginx-tunnel-pizza -n "$NAMESPACE" -o jsonpath='{.status.addresses[0].value}')
+      test -n "$host" || { echo "no address published on gateway/nginx-tunnel-pizza" >&2; exit 1; }
+      curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "https://$host/" | grep -q 'Welcome to nginx'
+
+  # The branches are alternatives, not additions. An Ingress here would mean the
+  # gateway value silently fell back.
+  - script: |
+      found=$(kubectl get ingress -n "$NAMESPACE" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+      test "$found" = "0" || { echo "found $found Ingress objects on the gateway branch" >&2; exit 1; }

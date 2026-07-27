@@ -1,0 +1,23 @@
+# The controller mints these at startup via --install; they are deliberately
+# absent from the chart, so this is the only place the two agree.
+#
+# spec.controller is the whole contract between a user's IngressClass and this
+# binary. It is derived by reflection from the ingress package's import path
+# and nothing checks it at build time, so moving or renaming that package
+# breaks every installed cluster and fails here instead.
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: tunnel.pizza
+spec:
+  controller: github.com/scaffoldly/tunnel/ingress
+---
+# The second provider. Its own class, not an annotation on the first: the name
+# is the provider, so this is what makes choosing a class sufficient
+# configuration.
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: api.trycloudflare.com
+spec:
+  controller: github.com/scaffoldly/tunnel/ingress

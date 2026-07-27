@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -54,9 +55,34 @@ func (r *Reconciler) origin(ctx context.Context, gw *gatewayv1.Gateway) (*url.UR
 	}
 
 	return &url.URL{
-		Scheme: consts.OriginScheme,
-		Host:   fmt.Sprintf("%s.%s.%s:%d", b.service, b.namespace, consts.OriginDomain, port),
+		Scheme: originScheme(gw, port),
+		Host:   fmt.Sprintf("%s.%s.%s:%d", b.service, b.namespace, consts.OriginDomain, port.Port),
 	}, nil
+}
+
+// scheme decides how the backend is dialed, exactly as the Ingress half does:
+// {provider}/protocol on the object, where the provider is the class it names,
+// then the Service's own spec.ports[].appProtocol, then plaintext.
+//
+// Kept symmetric deliberately. A Service that reaches the Gateway branch
+// instead of the Ingress one has said nothing about its origin, so dialing it
+// differently would make the choice of API silently change how the backend is
+// contacted.
+func originScheme(gw *gatewayv1.Gateway, port corev1.ServicePort) string {
+	if declared, ok := gw.Annotations[string(gw.Spec.GatewayClassName)+"/"+consts.ProtocolAnnotation]; ok {
+		return normalizeScheme(declared)
+	}
+	if port.AppProtocol != nil {
+		return normalizeScheme(*port.AppProtocol)
+	}
+	return consts.OriginScheme
+}
+
+func normalizeScheme(declared string) string {
+	if strings.EqualFold(declared, consts.OriginSchemeTLS) {
+		return consts.OriginSchemeTLS
+	}
+	return consts.OriginScheme
 }
 
 // single reduces the routes attached to gw to the one Service they name.
@@ -144,21 +170,24 @@ func slicesContains(bs []backend, want backend) bool {
 //
 // Read through the uncached API reader, for the same reason the Ingress half
 // does: a cached Get would start an informer over every Service in the cluster.
-func (r *Reconciler) port(ctx context.Context, b backend) (int32, error) {
+// Returns the whole ServicePort rather than its number: appProtocol rides on
+// it, and re-reading the Service for that would be a second round trip for
+// something already in hand.
+func (r *Reconciler) port(ctx context.Context, b backend) (corev1.ServicePort, error) {
 	var svc corev1.Service
 	key := client.ObjectKey{Namespace: b.namespace, Name: b.service}
 	if err := r.Services.Get(ctx, key, &svc); err != nil {
 		if apierrors.IsNotFound(err) {
 			// Transient by assumption: the Service may simply not exist yet.
-			return 0, fmt.Errorf("service %s not found", key)
+			return corev1.ServicePort{}, fmt.Errorf("service %s not found", key)
 		}
-		return 0, fmt.Errorf("get service %s: %w", key, err)
+		return corev1.ServicePort{}, fmt.Errorf("get service %s: %w", key, err)
 	}
 
 	for _, p := range svc.Spec.Ports {
 		if p.Port == b.port {
-			return p.Port, nil
+			return p, nil
 		}
 	}
-	return 0, fmt.Errorf("%w: service %s exposes no port %d", errUnsupported, key, b.port)
+	return corev1.ServicePort{}, fmt.Errorf("%w: service %s exposes no port %d", errUnsupported, key, b.port)
 }

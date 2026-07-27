@@ -1,0 +1,11 @@
+# Switching branch on a live Service. Owner-reference GC does not cover this —
+# the Service stays, so nothing collects the children of the branch it stopped
+# asking for, and the old pair would keep serving a tunnel nobody asked for.
+#
+# A script rather than a command, because $NAMESPACE is kuttl's generated one
+# and a bare `command:` runs without it. Getting that wrong edits nothing in the
+# default namespace and passes silently until the assertion below catches it.
+apiVersion: kuttl.dev/v1beta1
+kind: TestStep
+commands:
+  - script: kubectl annotate service nginx -n "$NAMESPACE" tunnel.pizza/tunnel=ingress --overwrite

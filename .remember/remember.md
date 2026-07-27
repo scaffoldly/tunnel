@@ -104,6 +104,77 @@ Adjacent facts from the same session, expensive to rediscover:
   are accepted as `loadBalancerClass`. It is validated as a qualified name, and
   dots are legal in the name half, so the provider vocabulary needs no mangling.
 
+## Phase 3: the Gateway branch
+
+`{provider}/tunnel: "gateway"` reconciles a **Gateway and an HTTPRoute**, both
+owned by the Service, where the Ingress branch writes one object. The existing
+`gateway/` reconciler does the rest — this generates input to a reconciler that
+already works rather than adding a second provisioning path.
+
+**Both children or neither.** A Gateway names no backend, so a Gateway without a
+route attached has nothing to point a tunnel at and the Gateway half reports it
+`Unsupported`. `children()` returns them as one unit, and the first object it
+returns is the one carrying the public address.
+
+**The two halves publish addresses to different fields**, which is why
+`hostnameOf` exists: Ingress to `status.loadBalancer.ingress[].hostname`,
+Gateway to `status.addresses[]` where the type is `Hostname`. An address typed
+`IPAddress` is deliberately skipped — a tunnel has no address to route to, so an
+IP on one of our Gateways is somebody else's and publishing it would advertise
+something that does not resolve.
+
+**Child names are shared across kinds on purpose.** The Gateway, the HTTPRoute
+and the Ingress branch's Ingress all take `<service>-<provider>`. Different
+kinds do not collide, and a Service switching branch then *replaces* its
+children rather than leaving a differently-named orphan. `childKey` is
+`{kind, name}` for exactly this reason — keyed on name alone, prune cannot tell
+the branches apart and a switch keeps both.
+
+**Switching API is the case that would have been missed.** Owner-reference GC
+does not cover it: the Service stays, so nothing collects the branch it stopped
+asking for and the old child keeps serving a tunnel nobody requests. `prune`
+therefore lists **every** kind every time, regardless of what the Service
+currently asks for — except on a cluster that does not serve the Gateway API,
+where listing those kinds is an error rather than an empty result.
+
+**The CRD gate.** `gateway.Installed` is now exported and the Service
+controller asks it directly, rather than being told, so there is one source of
+truth for what the cluster serves. Two consequences: the Gateway watch is
+registered only when the CRDs exist (controller-runtime fails to *start* a
+manager watching a kind the API server does not serve), and a Service asking
+for `gateway` on such a cluster gets a clear refusal naming
+`--install-gateway-api` rather than two objects nothing will reconcile.
+Registration order in `main.go` matters — gateway before service — so the CRDs
+are installed and established before this probe runs.
+
+**`spec.loadBalancerClass` + `{provider}/tunnel: "gateway"`: the annotation
+wins.** The class names a provider and cannot name an API, so a Service
+carrying both collapses to one request on the shared provider and something has
+to win. The annotation is the more specific statement; the alternative is that
+naming an API explicitly does nothing whenever the class happens to agree on
+the provider. This falls out of the existing resolution — the class sets only
+`on`, the annotation sets `on` and `api` — but it is now asserted.
+
+**The Gateway half honours the protocol hint too**, which was not in the brief
+and is needed for parity: `gateway/origin.go` reads `{provider}/protocol` off
+the Gateway (the provider being its class) and `appProtocol` off the resolved
+port, exactly as the Ingress half does. Without it, choosing the Gateway branch
+would silently change how the backend is dialed. Its `port()` now returns the
+whole `corev1.ServicePort` for the same reason the Ingress half's does.
+
+**20 mutations, all killed** — five needed a second pass, four because they
+survived rather than because they failed to build: prune listing gateway kinds
+on a cluster without them, an `IPAddress` read as a hostname, and both halves of
+the Gateway origin scheme. The last two mean the parity change shipped untested
+until the mutation said so; `gateway/origin_test.go` and `service/kinds_test.go`
+exist because of it.
+
+**A kuttl trap that cost a run:** a bare `command:` in a TestStep does not run
+in the test's generated namespace, and `$NAMESPACE` is not expanded there. The
+switch step edited nothing in `default`, reported `services "nginx" not found`,
+and only the assertion after it caught the problem. Use `script:` when the
+namespace matters.
+
 ## Phase 2: the Service controller, Ingress branch
 
 `service/service.go`, `children.go`, `status.go`. Both triggers reach one
@@ -411,8 +482,8 @@ that as well: the default `system:public-info-viewer` role grants
 `/version`, all measured. A second fetch requires **403** from a real API path,
 so a tunnel that served more than that would fail the suite.
 
-Four real tunnels per full run now, not two: ingress, gateway and service one
-each, plus service-annotate's.
+Five real tunnels per full run now, not two: ingress, gateway, service,
+service-annotate and service-gateway, one each.
 
 **A kuttl layout trap, caught only because the run output was read rather than
 trusted:** each `testDirs` entry is a directory *of* tests — every immediate

@@ -72,6 +72,20 @@ capability brings its rules in the same commit as the code that calls them.
                                  register there, and a rule naming an absent
                                  group is not an error.
 
+  gateways, httproutes           The write verbs are the Service half's Gateway
+    (+create/update/delete)      branch: {provider}/tunnel: "gateway" gets a
+                                 Gateway *and* an HTTPRoute, because a Gateway
+                                 names no backend and has nothing to point a
+                                 tunnel at until a route attaches to it.
+
+                                 delete carries the same scoping as ingresses
+                                 above — metav1.IsControlledBy in prune(), not
+                                 RBAC, which cannot express "only objects you
+                                 created". It also covers a Service switching
+                                 branch: ingress -> gateway must collect the
+                                 Ingress, or a tunnel keeps serving from an
+                                 object the Service no longer asks for.
+
   httproutes (get/list/watch)    A Gateway names no backend; routes attach to
                                  it, so the origin comes from whichever
                                  HTTPRoutes accept it as a parent.
@@ -161,13 +175,13 @@ rules:
     verbs: ["get", "list", "watch", "create"]
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["gateways"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["gateways/status"]
     verbs: ["update"]
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["httproutes"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["gatewayclasses"]
     verbs: ["get", "list", "watch", "create"]

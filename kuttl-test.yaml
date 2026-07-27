@@ -5,9 +5,9 @@
 # something to attach to while debugging.
 apiVersion: kuttl.dev/v1beta1
 kind: TestSuite
-# One entry, holding four suites: each immediate subdirectory of tests/e2e is a
-# suite (ingress, gateway, service, service-annotate). A new suite is a new
-# directory here and needs no change to this file.
+# One entry, holding five suites: each immediate subdirectory of tests/e2e is a
+# suite (ingress, gateway, service, service-annotate, service-gateway). A new
+# suite is a new directory here and needs no change to this file.
 #
 # Point an entry at a suite's step files instead of at their parent and kuttl
 # finds no subdirectories, logs "has 0 tests", and exits 0 — the suite never
@@ -26,8 +26,9 @@ timeout: 180
 # them together multiplies the concurrent load for no wall-clock gain — the
 # mint is the long pole either way.
 #
-# Four tunnels per run, one per suite. One of them — service-annotate's —
-# fronts the API server's own Service; see
+# Five tunnels per run, one per suite, up from four: service-gateway mints one
+# through the generated Gateway/HTTPRoute pair. One of the five —
+# service-annotate's — fronts the API server's own Service; see
 # tests/e2e/service-annotate/01-annotate.yaml for what that costs, what it does
 # and does not expose, and how it is torn down.
 parallel: 1

@@ -17,9 +17,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/scaffoldly/tunnel/config"
 	"github.com/scaffoldly/tunnel/consts"
+	"github.com/scaffoldly/tunnel/gateway"
 )
 
 // ControllerName is this package's import path, read from the type system for
@@ -51,6 +53,11 @@ type Reconciler struct {
 	// two caches then race.
 	Services client.Reader
 	Recorder events.EventRecorder
+	// GatewayAPI is whether this cluster serves the Gateway API. False makes
+	// the gateway branch a clear refusal rather than two child objects nothing
+	// will ever reconcile: the Gateway controllers do not register on such a
+	// cluster either.
+	GatewayAPI bool
 	// Probe reports how an origin speaks when the Service did not say. Best
 	// effort and injectable: the production one opens a socket, which no unit
 	// test should.
@@ -63,15 +70,26 @@ type Reconciler struct {
 
 // New registers the Service controller with mgr.
 func New(mgr ctrl.Manager, _ config.Config) error {
-	r := &Reconciler{
-		Client:    mgr.GetClient(),
-		Services:  mgr.GetAPIReader(),
-		Recorder:  mgr.GetEventRecorder(ReporterName),
-		Probe:     Probe,
-		Providers: consts.InstalledProviders,
+	// The same probe the Gateway half runs, and after it: registration order in
+	// main.go puts gateway first, so --install-gateway-api has already
+	// installed the CRDs and waited for them to be established by the time this
+	// asks. Asking again rather than being told keeps one source of truth for
+	// what the cluster serves.
+	gatewayAPI, err := gateway.Installed(mgr)
+	if err != nil {
+		return fmt.Errorf("detect gateway api: %w", err)
 	}
 
-	if err := ctrl.NewControllerManagedBy(mgr).
+	r := &Reconciler{
+		Client:     mgr.GetClient(),
+		Services:   mgr.GetAPIReader(),
+		Recorder:   mgr.GetEventRecorder(ReporterName),
+		GatewayAPI: gatewayAPI,
+		Probe:      Probe,
+		Providers:  consts.InstalledProviders,
+	}
+
+	builder := ctrl.NewControllerManagedBy(mgr).
 		// Metadata only. There is no field selector for "has an annotation
 		// whose name half is tunnel", so every Service in the cluster has to
 		// be watched; caching their specs as well would put the whole Service
@@ -88,8 +106,23 @@ func New(mgr ctrl.Manager, _ config.Config) error {
 		Watches(&networkingv1.Ingress{},
 			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &corev1.Service{},
 				handler.OnlyControllerOwner())).
-		Named(consts.ControllerService).
-		Complete(r); err != nil {
+		Named(consts.ControllerService)
+
+	if gatewayAPI {
+		// Behind the capability check for the same reason every other Gateway
+		// API watch is: controller-runtime fails to *start* a manager watching
+		// a kind the API server does not serve, so an Ingress-only cluster
+		// would crash-loop instead of simply not offering the branch.
+		//
+		// The Gateway carries the address, so it is the one worth waking for.
+		// The HTTPRoute publishes none — it is what gives the Gateway an
+		// origin, not a thing that is reached.
+		builder = builder.Watches(&gatewayv1.Gateway{},
+			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &corev1.Service{},
+				handler.OnlyControllerOwner()))
+	}
+
+	if err := builder.Complete(r); err != nil {
 		return fmt.Errorf("setup service controller: %w", err)
 	}
 
@@ -181,18 +214,21 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 func (r *Reconciler) reconcileChildren(ctx context.Context, svc *corev1.Service, wanted []resolved) (map[string]string, time.Duration, error) {
 	logger := log.FromContext(ctx)
 	hostnames := make(map[string]string, len(wanted))
-	keep := make(map[string]struct{}, len(wanted))
+	keep := make(map[childKey]struct{}, len(wanted))
 	var retry time.Duration
 
 	for _, want := range wanted {
-		if want.api != apiIngress {
-			// Phase 3. Refused rather than quietly served through the Ingress
-			// branch: a user who asked for Gateway semantics and silently got
-			// Ingress ones has been lied to.
+		if want.api == apiGateway && !r.GatewayAPI {
+			// Refused rather than served through the Ingress branch: a user who
+			// asked for Gateway semantics and silently got Ingress ones has
+			// been lied to. Refused rather than created-and-abandoned too — the
+			// Gateway controllers are not registered on this cluster, so the
+			// objects would sit there forever with nothing to reconcile them.
 			r.Recorder.Eventf(svc, nil, consts.EventTypeWarning, consts.ReasonUnsupported,
 				consts.ActionProvision, consts.MsgUnsupportedFmt,
-				fmt.Errorf("%w: the %q API is not implemented yet; set %s/%s: %q to use the Ingress branch",
-					consts.ErrUnsupported, want.api, want.provider, annotationTunnel, apiIngress))
+				fmt.Errorf("%w: this cluster does not serve the Gateway API, so %s/%s: %q cannot be honoured; "+
+					"install the Gateway API CRDs (or leave --install-gateway-api on) or use %q",
+					consts.ErrUnsupported, want.provider, annotationTunnel, apiGateway, apiIngress))
 			continue
 		}
 
@@ -217,18 +253,35 @@ func (r *Reconciler) reconcileChildren(ctx context.Context, svc *corev1.Service,
 			}
 		}
 
-		child, err := r.ensure(ctx, svc, want)
-		if err != nil {
-			if errors.Is(err, consts.ErrUnsupported) {
-				r.Recorder.Eventf(svc, nil, consts.EventTypeWarning, consts.ReasonUnsupported,
-					consts.ActionProvision, consts.MsgUnsupportedFmt, err)
-				continue
+		// Every object this branch needs, or none of them. A partial failure
+		// leaves what was created in place and is retried on the next pass:
+		// the objects are keyed by name, so the second attempt adopts the
+		// Gateway it already made rather than making another.
+		var primary client.Object
+		failed := false
+		for _, desired := range children(svc, want) {
+			live, err := r.ensure(ctx, svc, want, desired)
+			if err != nil {
+				if errors.Is(err, consts.ErrUnsupported) {
+					r.Recorder.Eventf(svc, nil, consts.EventTypeWarning, consts.ReasonUnsupported,
+						consts.ActionProvision, consts.MsgUnsupportedFmt, err)
+					failed = true
+					break
+				}
+				return nil, 0, err
 			}
-			return nil, 0, err
+			// Kept whether or not a later sibling fails, so a half-built pair
+			// is not torn down by the prune below and rebuilt next pass.
+			keep[keyOf(live)] = struct{}{}
+			if primary == nil {
+				primary = live
+			}
+		}
+		if failed {
+			continue
 		}
 
-		keep[child.Name] = struct{}{}
-		hostnames[want.provider] = childHostname(child)
+		hostnames[want.provider] = hostnameOf(primary)
 
 		if hostnames[want.provider] != "" {
 			r.Recorder.Eventf(svc, nil, consts.EventTypeNormal, consts.ReasonTunnelReady,
@@ -256,15 +309,4 @@ func statusProvider(svc *corev1.Service, known []string) (string, bool) {
 		return "", false
 	}
 	return class, true
-}
-
-// childHostname reads the address a child Ingress currently publishes, which
-// is where the Ingress half writes the tunnel's hostname.
-func childHostname(ing *networkingv1.Ingress) string {
-	for _, in := range ing.Status.LoadBalancer.Ingress {
-		if in.Hostname != "" {
-			return in.Hostname
-		}
-	}
-	return ""
 }

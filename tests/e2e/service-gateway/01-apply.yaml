@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - name: http
+              containerPort: 80
+---
+# One annotation, and its value picks the API. Everything a hand-written
+# Gateway and HTTPRoute would say — the class, the listener, the parentRef, the
+# backendRef and its port — is derived from this Service.
+#
+# Compare tests/e2e/gateway/01-apply.yaml, which is the same thing written out
+# by hand and passes the same way. That is the claim being tested: the
+# generated pair is not a special case, it is the object a user could have
+# written.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+  annotations:
+    tunnel.pizza/tunnel: gateway
+spec:
+  selector:
+    app: nginx
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
