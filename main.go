@@ -12,15 +12,21 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"path"
 	"runtime/debug"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/selection"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -68,6 +74,7 @@ func main() {
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
+		Cache:                  cacheOptions(),
 		Metrics:                metrics.New(metricsAddr),
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         leaderElect,
@@ -117,4 +124,40 @@ func leaderElectionID() string {
 		module = info.Main.Path
 	}
 	return strings.ReplaceAll(module, "/", "-")
+}
+
+// cacheOptions restricts what the manager's cache holds.
+//
+// Pods only, and that asymmetry is deliberate rather than an oversight.
+//
+// Pods are the most numerous and highest-churn object in a cluster — every
+// probe flap, status transition and scheduling decision is an event — and the
+// Pod half needs to find the few carrying a label. Restricting the ListWatch to
+// that label server-side means the informer never holds the rest, which is the
+// difference between memory proportional to "pods this controller serves" and
+// memory proportional to "pods in the cluster".
+//
+// Services are NOT restricted, and must not be. A Service can ask for a tunnel
+// two ways: the label, and spec.loadBalancerClass. The second lives in the spec
+// where no label selector can see it, so a label-restricted Service cache would
+// simply never deliver those Services and that trigger would stop working with
+// nothing to show for it — no error, no event, no reconcile. Services are
+// low-churn enough that watching all of them costs little, and their watch is
+// metadata-only anyway.
+func cacheOptions() cache.Options {
+	// Exists, not equality: the label's value chooses a branch and may be any
+	// of several, so what is being selected on is the key.
+	requirement, err := labels.NewRequirement(consts.TunnelLabel, selection.Exists, nil)
+	if err != nil {
+		// Unreachable: the key is a compile-time constant and a valid label
+		// key. Panicking beats starting with an unrestricted Pod cache, which
+		// would work and quietly cost what this exists to avoid.
+		panic(fmt.Sprintf("build pod cache selector: %v", err))
+	}
+
+	return cache.Options{
+		ByObject: map[client.Object]cache.ByObject{
+			&corev1.Pod{}: {Label: labels.NewSelector().Add(*requirement)},
+		},
+	}
 }

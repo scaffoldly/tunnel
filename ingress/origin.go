@@ -56,7 +56,7 @@ func (r *Reconciler) origin(ctx context.Context, ing *networkingv1.Ingress) (*ur
 // scheme decides how the backend is dialed.
 //
 // An Ingress has no field for this — every controller spells it as its own
-// annotation, and this one is {provider}/protocol, where the provider is the
+// label, and this one is {provider}/protocol, where the provider is the
 // class the Ingress names. The Service's own spec.ports[].appProtocol is
 // honoured too, so a Service that already declares itself needs no annotation:
 // that field is core, has exactly the vocabulary wanted here, and is what a
@@ -64,13 +64,13 @@ func (r *Reconciler) origin(ctx context.Context, ing *networkingv1.Ingress) (*ur
 //
 // Anything unrecognised, in either place, means plaintext. This is the one
 // place a wrong value must not fail the tunnel: appProtocol has an open
-// vocabulary that belongs to the Service's author, and an Ingress annotation
-// that reads "HTTPS " with a stray space should serve rather than 502. The
+// vocabulary that belongs to the Service's author, and a label that reads
+// "HTTPS" should serve rather than 502. The
 // Service controller validates the annotation strictly when it writes it, which
 // is where a typo can still be reported against the object the user edited.
 func scheme(ing *networkingv1.Ingress, port corev1.ServicePort) string {
 	if ing.Spec.IngressClassName != nil {
-		if declared, ok := ing.Annotations[*ing.Spec.IngressClassName+"/"+consts.ProtocolAnnotation]; ok {
+		if declared, ok := ing.Labels[*ing.Spec.IngressClassName+"/"+consts.ProtocolLabel]; ok {
 			return normalizeScheme(declared)
 		}
 	}

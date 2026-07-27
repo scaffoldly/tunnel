@@ -4,4 +4,4 @@
 apiVersion: kuttl.dev/v1beta1
 kind: TestStep
 commands:
-  - script: kubectl annotate pod nginx -n "$NAMESPACE" tunnel.pizza/tunnel-
+  - script: kubectl label pod nginx -n "$NAMESPACE" tunnel.pizza/tunnel-

@@ -9,4 +9,4 @@
 apiVersion: kuttl.dev/v1beta1
 kind: TestStep
 commands:
-  - command: kubectl annotate service kubernetes --namespace default tunnel.pizza/tunnel-
+  - command: kubectl label service kubernetes --namespace default tunnel.pizza/tunnel-

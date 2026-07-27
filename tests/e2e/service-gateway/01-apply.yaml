@@ -31,7 +31,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: nginx
-  annotations:
+  labels:
     tunnel.pizza/tunnel: gateway
 spec:
   selector:

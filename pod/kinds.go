@@ -48,7 +48,7 @@ func equal(existing, desired client.Object) bool {
 		e := existing.(*corev1.Service)
 		return apiequality.Semantic.DeepEqual(e.Spec.Ports, d.Spec.Ports) &&
 			e.Spec.Selector == nil &&
-			annotationsMatch(e.Annotations, d.Annotations)
+			labelsMatch(e.Labels, d.Labels)
 	case *discoveryv1.EndpointSlice:
 		e := existing.(*discoveryv1.EndpointSlice)
 		return apiequality.Semantic.DeepEqual(e.Endpoints, d.Endpoints) &&
@@ -67,11 +67,11 @@ func copyInto(dst, src client.Object) {
 		// left: a selector on this Service is the failure this design exists to
 		// avoid.
 		d.Spec.Selector = nil
-		if d.Annotations == nil {
-			d.Annotations = map[string]string{}
+		if d.Labels == nil {
+			d.Labels = map[string]string{}
 		}
-		for k, v := range s.Annotations {
-			d.Annotations[k] = v
+		for k, v := range s.Labels {
+			d.Labels[k] = v
 		}
 	case *discoveryv1.EndpointSlice:
 		s := src.(*discoveryv1.EndpointSlice)
@@ -81,10 +81,9 @@ func copyInto(dst, src client.Object) {
 	}
 }
 
-// annotationsMatch reports whether want is a subset of got, so an annotation
-// somebody else added to the generated Service does not cause a rewrite on
-// every pass.
-func annotationsMatch(got, want map[string]string) bool {
+// labelsMatch reports whether want is a subset of got, so a label somebody else
+// added to the generated Service does not cause a rewrite on every pass.
+func labelsMatch(got, want map[string]string) bool {
 	for k, v := range want {
 		if got[k] != v {
 			return false

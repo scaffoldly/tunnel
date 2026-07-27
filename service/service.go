@@ -242,13 +242,13 @@ func (r *Reconciler) reconcileChildren(ctx context.Context, svc *corev1.Service,
 				logger.Info("could not determine origin protocol", "address", address, "error", err)
 				r.Recorder.Eventf(svc, nil, consts.EventTypeWarning, consts.ReasonProtocol,
 					consts.ActionProvision, consts.MsgProtocolUnknownFmt,
-					address, err, want.protocol, want.provider, consts.ProtocolAnnotation)
+					address, err, want.protocol, want.provider, consts.ProtocolLabel)
 				retry = consts.TunnelRetryInterval
 			case scheme != want.protocol:
 				logger.Info("detected origin protocol", "address", address, "protocol", scheme)
 				r.Recorder.Eventf(svc, nil, consts.EventTypeNormal, consts.ReasonProtocol,
 					consts.ActionProvision, consts.MsgProtocolProbedFmt,
-					address, scheme, want.provider, consts.ProtocolAnnotation)
+					address, scheme, want.provider, consts.ProtocolLabel)
 				want.protocol = scheme
 			}
 		}

@@ -61,7 +61,7 @@ func (r *Reconciler) origin(ctx context.Context, gw *gatewayv1.Gateway) (*url.UR
 }
 
 // scheme decides how the backend is dialed, exactly as the Ingress half does:
-// {provider}/protocol on the object, where the provider is the class it names,
+// the {provider}/protocol label on the object, where the provider is the class
 // then the Service's own spec.ports[].appProtocol, then plaintext.
 //
 // Kept symmetric deliberately. A Service that reaches the Gateway branch
@@ -69,7 +69,7 @@ func (r *Reconciler) origin(ctx context.Context, gw *gatewayv1.Gateway) (*url.UR
 // differently would make the choice of API silently change how the backend is
 // contacted.
 func originScheme(gw *gatewayv1.Gateway, port corev1.ServicePort) string {
-	if declared, ok := gw.Annotations[string(gw.Spec.GatewayClassName)+"/"+consts.ProtocolAnnotation]; ok {
+	if declared, ok := gw.Labels[string(gw.Spec.GatewayClassName)+"/"+consts.ProtocolLabel]; ok {
 		return normalizeScheme(declared)
 	}
 	if port.AppProtocol != nil {

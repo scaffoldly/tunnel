@@ -17,13 +17,17 @@ commands:
   - script: |
       status=$(kubectl get service kubernetes -n default -o jsonpath='{.status.loadBalancer.ingress}')
       test -z "$status" || { echo "status.loadBalancer.ingress on the annotated service = '$status', want empty" >&2; exit 1; }
-      count=$(kubectl get service kubernetes -n default -o go-template='{{ len .metadata.annotations }}')
-      test "$count" = "1" || {
-        echo "annotations on the annotated service = $count, want only the 1 this suite set" >&2
-        kubectl get service kubernetes -n default -o jsonpath='{.metadata.annotations}' >&2
+      # The kubernetes Service ships with two labels of its own, and this
+      # suite adds one. Anything beyond three was written by the controller.
+      count=$(kubectl get service kubernetes -n default -o go-template='{{ len .metadata.labels }}')
+      test "$count" = "3" || {
+        echo "labels on the service = $count, want its own 2 plus the 1 this suite set" >&2
+        kubectl get service kubernetes -n default -o jsonpath='{.metadata.labels}' >&2
         exit 1
       }
-      kubectl get service kubernetes -n default -o jsonpath='{.metadata.annotations.tunnel\.pizza/tunnel}' | grep -qx ingress
+      test -z "$(kubectl get service kubernetes -n default -o jsonpath='{.metadata.annotations}')" || {
+        echo "the controller wrote annotations onto the service" >&2; exit 1; }
+      kubectl get service kubernetes -n default -o jsonpath='{.metadata.labels.tunnel\.pizza/tunnel}' | grep -qx ingress
 
   # A real 2xx from the API server, fetched over the public internet through a
   # tunnel that was created by annotating a Service.

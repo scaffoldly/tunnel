@@ -44,8 +44,8 @@
 # because a step above went red: the tunnel to your API server is still up.
 # Delete the cluster, or remove the annotation by hand:
 #
-#   kubectl annotate svc kubernetes -n default tunnel.pizza/tunnel-
+#   kubectl label svc kubernetes -n default tunnel.pizza/tunnel-
 apiVersion: kuttl.dev/v1beta1
 kind: TestStep
 commands:
-  - command: kubectl annotate service kubernetes --namespace default tunnel.pizza/tunnel=ingress --overwrite
+  - command: kubectl label service kubernetes --namespace default tunnel.pizza/tunnel=ingress --overwrite

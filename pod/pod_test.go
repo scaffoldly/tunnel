@@ -37,12 +37,11 @@ func reconciler(t *testing.T, objs ...client.Object) (*Reconciler, client.Client
 // runPod is what `kubectl run nginx --image=nginx` produces: one label, no
 // declared ports, and an address once scheduled. Verified against a real
 // cluster rather than assumed.
-func runPod(annotations map[string]string, ports ...corev1.ContainerPort) *corev1.Pod {
+func runPod(labels map[string]string, ports ...corev1.ContainerPort) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: testKey.Namespace, Name: testKey.Name, UID: "pod-uid",
-			Labels:      map[string]string{"run": "nginx"},
-			Annotations: annotations,
+			Labels: merge(map[string]string{"run": "nginx"}, labels),
 		},
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{{Name: "nginx", Image: "nginx", Ports: ports}},
@@ -111,10 +110,12 @@ func TestReconcileFrontsThePod(t *testing.T) {
 	}
 
 	svc := getService(t, c, "nginx-tunnel")
-	// The annotation is carried across verbatim: that is what makes the Service
-	// half do all the remaining work.
-	if got := svc.Annotations["tunnel.pizza/tunnel"]; got != "true" {
-		t.Errorf("annotation on the generated service = %q, want true", got)
+	// The RESOLVED branch, not the sugar the Pod was labelled with. "true" is
+	// an input spelling; a child labelled "true" would mean the controller
+	// emitted a value it does not itself use, and the alias would then have to
+	// be understood in two places instead of one.
+	if got := svc.Labels["tunnel.pizza/tunnel"]; got != "ingress" {
+		t.Errorf("label on the generated service = %q, want ingress", got)
 	}
 	// No selector, ever. A selector built from this Pod's labels would be
 	// `run: nginx`, which a second `kubectl run nginx` would join.
@@ -161,8 +162,9 @@ func TestReconcileLeavesThePodUntouched(t *testing.T) {
 	if err := c.Get(context.Background(), testKey, pod); err != nil {
 		t.Fatal(err)
 	}
-	if len(pod.Annotations) != 1 {
-		t.Errorf("annotations = %v, want only the user's own", pod.Annotations)
+	// The Pod keeps its own label and the one the user added, and gains nothing.
+	if len(pod.Labels) != 2 {
+		t.Errorf("labels = %v, want only run= and the user's own", pod.Labels)
 	}
 }
 
@@ -183,7 +185,7 @@ func TestReconcileDeletesWhenTheAnnotationGoes(t *testing.T) {
 	if err := c.Get(context.Background(), testKey, pod); err != nil {
 		t.Fatal(err)
 	}
-	pod.Annotations = nil
+	pod.Labels = map[string]string{"run": "nginx"}
 	if err := c.Update(context.Background(), pod); err != nil {
 		t.Fatal(err)
 	}
@@ -330,14 +332,17 @@ func TestReconcileCarriesTheGatewayValue(t *testing.T) {
 	}
 
 	svc := getService(t, c, "nginx-tunnel")
-	if got := svc.Annotations["tunnel.pizza/tunnel"]; got != "gateway" {
+	if got := svc.Labels["tunnel.pizza/tunnel"]; got != "gateway" {
 		t.Errorf("tunnel annotation = %q, want gateway", got)
 	}
-	if got := svc.Annotations["tunnel.pizza/protocol"]; got != "https" {
+	if got := svc.Labels["tunnel.pizza/protocol"]; got != "https" {
 		t.Errorf("protocol annotation = %q, want https", got)
 	}
-	if _, ok := svc.Annotations["example.com/unrelated"]; ok {
-		t.Error("an unrelated annotation was copied onto the generated service")
+	if _, ok := svc.Labels["example.com/unrelated"]; ok {
+		t.Error("an unrelated label was copied onto the generated service")
+	}
+	if _, ok := svc.Labels["run"]; ok {
+		t.Error("the pod's own run label was copied onto the generated service")
 	}
 }
 
@@ -428,4 +433,16 @@ func TestEnsureClearsASelectorItFinds(t *testing.T) {
 	if got := getService(t, c, "nginx-tunnel").Spec.Selector; got != nil {
 		t.Errorf("selector = %v, want it cleared", got)
 	}
+}
+
+// merge overlays b onto a without mutating either.
+func merge(a, b map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
 }

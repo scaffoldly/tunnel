@@ -177,8 +177,8 @@ func TestChildDeclaresTheProtocol(t *testing.T) {
 			provider: "tunnel.pizza", api: apiIngress,
 			port: servicePort{number: 8443}, protocol: protocol,
 		})
-		if got := ing.Annotations["tunnel.pizza/protocol"]; got != protocol {
-			t.Errorf("child annotation = %q, want %q", got, protocol)
+		if got := ing.Labels["tunnel.pizza/protocol"]; got != protocol {
+			t.Errorf("child label = %q, want %q", got, protocol)
 		}
 	}
 }

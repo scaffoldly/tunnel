@@ -14,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/scaffoldly/tunnel/consts"
+	"github.com/scaffoldly/tunnel/service"
 )
 
 // defaultPort is what a Pod that declares no container port is assumed to
@@ -245,23 +246,26 @@ func podReady(pod *corev1.Pod) bool {
 
 // objectMeta is the metadata both generated objects carry.
 func objectMeta(pod *corev1.Pod) metav1.ObjectMeta {
-	annotations := map[string]string{}
-	for key, value := range pod.Annotations {
-		// Only ours, and only the ones that mean something downstream. Copying
-		// the Pod's whole annotation set would drag kubectl's last-applied and
-		// every sidecar injector's marker onto an object they were not written
-		// for.
-		if _, name, ok := strings.Cut(key, "/"); ok &&
-			(name == consts.TunnelAnnotation || name == consts.ProtocolAnnotation) {
-			annotations[key] = value
+	labels := map[string]string{
+		consts.LabelManagedBy: consts.ManagedBy,
+		// The resolved branch, never the sugar that was written. A Pod labelled
+		// "true" produces a Service labelled "ingress": "true" is an input
+		// spelling, and everything this controller emits says what it did.
+		consts.TunnelLabel: service.API(pod.Labels),
+	}
+	for key, value := range pod.Labels {
+		// Only ours, and only what means something downstream. Copying the
+		// Pod's whole label set would drag `run: nginx` and every selector
+		// somebody else relies on onto an object they were not written for.
+		if _, name, ok := strings.Cut(key, "/"); ok && name == consts.ProtocolLabel {
+			labels[key] = value
 		}
 	}
 
 	return metav1.ObjectMeta{
-		Name:        childName(pod.Name),
-		Namespace:   pod.Namespace,
-		Labels:      map[string]string{consts.LabelManagedBy: consts.ManagedBy},
-		Annotations: annotations,
+		Name:      childName(pod.Name),
+		Namespace: pod.Namespace,
+		Labels:    labels,
 		OwnerReferences: []metav1.OwnerReference{
 			*metav1.NewControllerRef(pod, corev1.SchemeGroupVersion.WithKind("Pod")),
 		},

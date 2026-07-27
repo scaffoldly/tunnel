@@ -68,7 +68,7 @@ func TestOriginScheme(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			gw := &gatewayv1.Gateway{
-				ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "web", Annotations: tc.annotations},
+				ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "web", Labels: tc.annotations},
 				Spec:       gatewayv1.GatewaySpec{GatewayClassName: gatewayv1.ObjectName(tc.class)},
 			}
 			port := corev1.ServicePort{Name: "http", Port: 8080}

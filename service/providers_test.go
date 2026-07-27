@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/scaffoldly/tunnel/consts"
 )
@@ -19,9 +20,9 @@ import (
 // constants are wrong.
 var known = []string{"tunnel.pizza", "api.trycloudflare.com"}
 
-func svc(annotations map[string]string, ports ...corev1.ServicePort) *corev1.Service {
+func svc(labels map[string]string, ports ...corev1.ServicePort) *corev1.Service {
 	return &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "web", Annotations: annotations},
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "web", Labels: labels},
 		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, Ports: ports},
 	}
 }
@@ -102,7 +103,7 @@ func TestProviders(t *testing.T) {
 			// to appear.
 			name:    "True is not true",
 			svc:     svc(map[string]string{"tunnel.pizza/tunnel": "True"}, httpPort),
-			wantErr: `annotation tunnel.pizza/tunnel="True": must be "true", "ingress", "gateway" or "none"`,
+			wantErr: `label tunnel.pizza/tunnel="True": must be "true", "ingress", "gateway" or "none"`,
 		},
 		{
 			name:    "yes is an error, not an on",
@@ -137,34 +138,37 @@ func TestProviders(t *testing.T) {
 		{
 			name:    "yes is the value someone will write, and it is an error",
 			svc:     svc(map[string]string{"tunnel.pizza/tunnel": "yes"}, httpPort),
-			wantErr: `annotation tunnel.pizza/tunnel="yes": must be "true", "ingress", "gateway" or "none"`,
+			wantErr: `label tunnel.pizza/tunnel="yes": must be "true", "ingress", "gateway" or "none"`,
 		},
 		{
 			name:    "an empty value is an error, not an off",
 			svc:     svc(map[string]string{"tunnel.pizza/tunnel": ""}, httpPort),
-			wantErr: `annotation tunnel.pizza/tunnel="": must be "true", "ingress", "gateway" or "none"`,
+			wantErr: `label tunnel.pizza/tunnel="": must be "true", "ingress", "gateway" or "none"`,
 		},
 		{
-			name:    "an unknown provider is a typo, and is reported",
-			svc:     svc(map[string]string{"tunnel.example.com/tunnel": "true"}, httpPort),
-			wantErr: `names unknown provider "tunnel.example.com"; known providers are tunnel.pizza, api.trycloudflare.com`,
+			// One fixed key, so this is simply not it. There is no
+			// unknown-provider error to report any more: a label this
+			// controller does not recognise is not its business, which is the
+			// same answer a foreign loadBalancerClass already gets.
+			name: "a tunnel label with another prefix is not the shortcut",
+			svc:  svc(map[string]string{"tunnel.example.com/tunnel": "ingress"}, httpPort),
 		},
 		{
-			name:    "a prefixless annotation names no provider",
-			svc:     svc(map[string]string{"tunnel": "true"}, httpPort),
-			wantErr: `annotation "tunnel" names no provider`,
+			name: "a prefixless tunnel label is not it either",
+			svc:  svc(map[string]string{"tunnel": "ingress"}, httpPort),
 		},
 		{
-			name: "the other provider works the same way",
+			// The shortcut cannot choose a provider — the key says which one.
+			// Cloudflare is reached by naming its class on an Ingress, or by
+			// spec.loadBalancerClass.
+			name: "the label for the other provider does not activate it",
 			svc:  svc(map[string]string{"api.trycloudflare.com/tunnel": "ingress"}, httpPort),
-			want: []resolved{{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme}},
 		},
 		{
-			name: "two providers are two tunnels, in a fixed order",
-			svc: svc(map[string]string{
-				"tunnel.pizza/tunnel":          "ingress",
-				"api.trycloudflare.com/tunnel": "ingress",
-			}, httpPort),
+			name: "two providers still happen, through the two triggers",
+			svc: loadBalancer("api.trycloudflare.com", svc(map[string]string{
+				"tunnel.pizza/tunnel": "ingress",
+			}, httpPort)),
 			want: []resolved{
 				{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme},
 				{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme},
@@ -197,7 +201,7 @@ func TestProviders(t *testing.T) {
 		},
 		{
 			name: "two providers through two different triggers are two tunnels",
-			svc:  loadBalancer("tunnel.pizza", svc(map[string]string{"api.trycloudflare.com/tunnel": "ingress"}, httpPort)),
+			svc:  loadBalancer("api.trycloudflare.com", svc(map[string]string{"tunnel.pizza/tunnel": "ingress"}, httpPort)),
 			want: []resolved{
 				{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme},
 				{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme},
@@ -209,9 +213,8 @@ func TestProviders(t *testing.T) {
 		},
 		{
 			name: "an explicit off on one provider leaves the other alone",
-			svc: loadBalancer("tunnel.pizza", svc(map[string]string{
-				"tunnel.pizza/tunnel":          "none",
-				"api.trycloudflare.com/tunnel": "ingress",
+			svc: loadBalancer("api.trycloudflare.com", svc(map[string]string{
+				"tunnel.pizza/tunnel": "none",
 			}, httpPort)),
 			want: []resolved{{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme}},
 		},
@@ -222,11 +225,12 @@ func TestProviders(t *testing.T) {
 			want: []resolved{{provider: "tunnel.pizza", api: apiGateway, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme}},
 		},
 		{
-			name: "the API is per provider",
-			svc: svc(map[string]string{
-				"tunnel.pizza/tunnel":          "gateway",
-				"api.trycloudflare.com/tunnel": "ingress",
-			}, httpPort),
+			// The label picks the API for the provider it names; the
+			// loadBalancerClass path cannot say and takes the default.
+			name: "the API the label names does not leak onto the other trigger",
+			svc: loadBalancer("api.trycloudflare.com", svc(map[string]string{
+				"tunnel.pizza/tunnel": "gateway",
+			}, httpPort)),
 			want: []resolved{
 				{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme},
 				{provider: "tunnel.pizza", api: apiGateway, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme},
@@ -264,16 +268,15 @@ func TestProviders(t *testing.T) {
 				"tunnel.pizza/tunnel":   "ingress",
 				"tunnel.pizza/protocol": "grpc",
 			}, httpPort),
-			wantErr: `annotation tunnel.pizza/protocol="grpc": must be "http" or "https"`,
+			wantErr: `label tunnel.pizza/protocol="grpc": must be "http" or "https"`,
 		},
 		{
 			name: "protocol is per provider",
-			svc: svc(map[string]string{
+			svc: loadBalancer("api.trycloudflare.com", svc(map[string]string{
 				"tunnel.pizza/tunnel":            "ingress",
 				"tunnel.pizza/protocol":          "https",
-				"api.trycloudflare.com/tunnel":   "ingress",
 				"api.trycloudflare.com/protocol": "http",
-			}, httpPort),
+			}, httpPort)),
 			want: []resolved{
 				{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme, declared: true},
 				{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginSchemeTLS, declared: true},
@@ -282,7 +285,7 @@ func TestProviders(t *testing.T) {
 		{
 			name:    "a protocol naming no tunnel is a half-finished edit",
 			svc:     svc(map[string]string{"tunnel.pizza/protocol": "https"}, httpPort),
-			wantErr: `annotation tunnel.pizza/protocol names no tunnel; add tunnel.pizza/tunnel: "ingress"`,
+			wantErr: `label tunnel.pizza/protocol names no tunnel; add label tunnel.pizza/tunnel: "ingress"`,
 		},
 		{
 			name: "a protocol kept beside an explicit off is not an orphan",
@@ -319,7 +322,7 @@ func TestProviders(t *testing.T) {
 		{
 			name:    "a bad value is reported even though it would have left no tunnel",
 			svc:     svc(map[string]string{"tunnel.pizza/tunnel": "maybe"}, tcp("grpc", 9090), tcp("", 5432)),
-			wantErr: `annotation tunnel.pizza/tunnel="maybe"`,
+			wantErr: `label tunnel.pizza/tunnel="maybe"`,
 		},
 		{
 			name:    "ambiguous ports are not reported for a service that asked for nothing",
@@ -368,11 +371,10 @@ func TestProviders(t *testing.T) {
 // It matters because the child object names in the next phase are derived from
 // this order, and an unstable one orphans a child per reconcile.
 func TestProvidersOrderIsStable(t *testing.T) {
-	s := svc(map[string]string{
-		"tunnel.pizza/tunnel":          "gateway",
-		"api.trycloudflare.com/tunnel": "ingress",
-		"meta.helm.sh/release-name":    "web",
-	}, httpPort)
+	s := loadBalancer("api.trycloudflare.com", svc(map[string]string{
+		"tunnel.pizza/tunnel":       "gateway",
+		"meta.helm.sh/release-name": "web",
+	}, httpPort))
 
 	want := []resolved{
 		{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme},
@@ -395,11 +397,11 @@ func TestProvidersOrderIsStable(t *testing.T) {
 // on it changes text on every reconcile.
 func TestProvidersReportsTheSameErrorEveryTime(t *testing.T) {
 	s := svc(map[string]string{
-		"tunnel.pizza/tunnel":          "nope",
-		"api.trycloudflare.com/tunnel": "yes",
+		"tunnel.pizza/tunnel":   "nope",
+		"tunnel.pizza/protocol": "sideways",
 	}, httpPort)
 
-	const want = `annotation api.trycloudflare.com/tunnel="yes": must be "true", "ingress", "gateway" or "none"`
+	const want = `label tunnel.pizza/tunnel="nope": must be "true", "ingress", "gateway" or "none"`
 	for i := range 100 {
 		_, err := providers(s, known)
 		if err == nil {
@@ -472,5 +474,84 @@ func TestTrueIsAGenuineAliasForIngress(t *testing.T) {
 	// And specifically: the resolved API is the branch, never the input sugar.
 	if len(fromTrue) != 1 || fromTrue[0].api != apiIngress {
 		t.Errorf("true resolved to api %q, want %q", fromTrue[0].api, apiIngress)
+	}
+}
+
+// TestWrittenValuesAreValidLabels: label values are validated where annotation
+// values were not, so everything this controller writes into one has to be
+// legal. All of these are constants, which is exactly why nothing would notice
+// if one grew a space or a slash.
+func TestWrittenValuesAreValidLabels(t *testing.T) {
+	written := []string{
+		string(apiIngress), string(apiGateway), tunnelNone, tunnelTrue, tunnelFalse,
+		consts.OriginScheme, consts.OriginSchemeTLS, consts.ManagedBy,
+	}
+	for _, value := range written {
+		if errs := validation.IsValidLabelValue(value); len(errs) != 0 {
+			t.Errorf("value %q is written into a label but is not a valid one: %v", value, errs)
+		}
+	}
+
+	keys := []string{consts.TunnelLabel, consts.LabelManagedBy,
+		consts.ProviderTunnelPizza + "/" + consts.ProtocolLabel,
+		consts.ProviderCloudflare + "/" + consts.ProtocolLabel}
+	for _, key := range keys {
+		if errs := validation.IsQualifiedName(key); len(errs) != 0 {
+			t.Errorf("key %q is used as a label key but is not qualified: %v", key, errs)
+		}
+	}
+}
+
+// TestProtocolPrecedence pins the order the migration could have flipped
+// without any fixture noticing, because most fixtures agree with each other:
+// the label wins over appProtocol, and only an undeclared origin is left for
+// the probe to decide.
+func TestProtocolPrecedence(t *testing.T) {
+	tests := []struct {
+		name         string
+		label        string
+		appProtocol  string
+		want         string
+		wantDeclared bool
+	}{
+		{name: "nothing declared leaves it to the probe", want: consts.OriginScheme, wantDeclared: false},
+		{name: "appProtocol alone decides", appProtocol: "https", want: consts.OriginSchemeTLS, wantDeclared: true},
+		{name: "the label alone decides", label: "https", want: consts.OriginSchemeTLS, wantDeclared: true},
+		{
+			name: "the label beats appProtocol", label: "http", appProtocol: "https",
+			want: consts.OriginScheme, wantDeclared: true,
+		},
+		{
+			name: "and in the other direction", label: "https", appProtocol: "http",
+			want: consts.OriginSchemeTLS, wantDeclared: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			labels := map[string]string{"tunnel.pizza/tunnel": "ingress"}
+			if tc.label != "" {
+				labels["tunnel.pizza/protocol"] = tc.label
+			}
+			port := tcp("http", 80)
+			if tc.appProtocol != "" {
+				port = appProto(port, tc.appProtocol)
+			}
+
+			got, err := providers(svc(labels, port), known)
+			if err != nil {
+				t.Fatalf("providers() error = %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("providers() = %v, want one", got)
+			}
+			if got[0].protocol != tc.want {
+				t.Errorf("protocol = %q, want %q", got[0].protocol, tc.want)
+			}
+			// declared is what stops the probe overriding a statement.
+			if got[0].declared != tc.wantDeclared {
+				t.Errorf("declared = %v, want %v", got[0].declared, tc.wantDeclared)
+			}
+		})
 	}
 }

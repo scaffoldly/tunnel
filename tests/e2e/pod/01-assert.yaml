@@ -18,8 +18,8 @@ metadata:
   name: nginx-tunnel
   labels:
     app.kubernetes.io/managed-by: tunnel
-  annotations:
-    tunnel.pizza/tunnel: "true"
+    # The resolved branch, not the "true" the Pod was labelled with.
+    tunnel.pizza/tunnel: ingress
   ownerReferences:
     - apiVersion: v1
       kind: Pod

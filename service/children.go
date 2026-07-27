@@ -82,31 +82,23 @@ func (r *Reconciler) ensure(ctx context.Context, svc *corev1.Service, want resol
 	}
 
 	if apiequality.Semantic.DeepEqual(specOf(existing), specOf(desired)) &&
-		existing.GetLabels()[consts.LabelManagedBy] == desired.GetLabels()[consts.LabelManagedBy] &&
-		matches(existing.GetAnnotations(), desired.GetAnnotations()) {
+		matches(existing.GetLabels(), desired.GetLabels()) {
 		return existing, nil
 	}
 
 	updated := existing.DeepCopyObject().(client.Object)
 	copySpec(updated, desired)
 
+	// Merged, not replaced: a label somebody else put on the child is not ours
+	// to drop.
 	labels := updated.GetLabels()
 	if labels == nil {
 		labels = map[string]string{}
 	}
-	labels[consts.LabelManagedBy] = consts.ManagedBy
+	for k, v := range desired.GetLabels() {
+		labels[k] = v
+	}
 	updated.SetLabels(labels)
-
-	// Merged, not replaced: an annotation somebody else put on the child is
-	// not ours to drop.
-	annotations := updated.GetAnnotations()
-	if annotations == nil {
-		annotations = map[string]string{}
-	}
-	for k, v := range desired.GetAnnotations() {
-		annotations[k] = v
-	}
-	updated.SetAnnotations(annotations)
 
 	if err := r.Update(ctx, updated); err != nil {
 		return nil, fmt.Errorf("update %s %s: %w", kind, client.ObjectKeyFromObject(updated), err)
@@ -252,14 +244,14 @@ func objectMeta(svc *corev1.Service, want resolved, name string) metav1.ObjectMe
 	return metav1.ObjectMeta{
 		Name:      name,
 		Namespace: svc.Namespace,
-		Labels:    map[string]string{consts.LabelManagedBy: consts.ManagedBy},
 		// The child restates how its origin is dialed, rather than the serving
 		// reconciler reaching back to the Service for it. That keeps the
 		// generated object self-describing — the whole argument for generating
 		// a real object instead of hiding the tunnel — and it means a
 		// hand-written object can say the same thing the same way.
-		Annotations: map[string]string{
-			want.provider + "/" + consts.ProtocolAnnotation: want.protocol,
+		Labels: map[string]string{
+			consts.LabelManagedBy:                      consts.ManagedBy,
+			want.provider + "/" + consts.ProtocolLabel: want.protocol,
 		},
 		// Namespaced owner, namespaced dependent, same namespace: legal, unlike
 		// the cluster-scoped classes the installer creates, which have to be

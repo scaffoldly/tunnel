@@ -16,10 +16,14 @@ commands:
   # The Pod is the user's object and is left exactly as they wrote it: the one
   # annotation they added, and no status or metadata written back.
   - script: |
-      count=$(kubectl get pod nginx -n "$NAMESPACE" -o go-template='{{ len .metadata.annotations }}')
-      test "$count" = "1" || {
-        echo "annotations on the pod = $count, want only the 1 this suite set" >&2
-        kubectl get pod nginx -n "$NAMESPACE" -o jsonpath='{.metadata.annotations}' >&2
+      # `kubectl run` gives the Pod `run: nginx`; this suite adds one label.
+      # Anything beyond those two was written by the controller.
+      count=$(kubectl get pod nginx -n "$NAMESPACE" -o go-template='{{ len .metadata.labels }}')
+      test "$count" = "2" || {
+        echo "labels on the pod = $count, want run= and the 1 this suite set" >&2
+        kubectl get pod nginx -n "$NAMESPACE" -o jsonpath='{.metadata.labels}' >&2
         exit 1
       }
-      kubectl get pod nginx -n "$NAMESPACE" -o jsonpath='{.metadata.annotations.tunnel\.pizza/tunnel}' | grep -qx true
+      test -z "$(kubectl get pod nginx -n "$NAMESPACE" -o jsonpath='{.metadata.annotations}')" || {
+        echo "the controller wrote annotations onto the pod" >&2; exit 1; }
+      kubectl get pod nginx -n "$NAMESPACE" -o jsonpath='{.metadata.labels.tunnel\.pizza/tunnel}' | grep -qx true

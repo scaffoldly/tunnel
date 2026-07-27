@@ -15,7 +15,6 @@ metadata:
   name: nginx-tunnel-pizza
   labels:
     app.kubernetes.io/managed-by: tunnel
-  annotations:
     # Detected, not declared: nginx says nothing about its protocol, so the
     # controller dialed it, was refused a TLS handshake, and concluded
     # plaintext. Same detection the Ingress branch gets.

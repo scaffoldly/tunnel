@@ -8,4 +8,4 @@
 apiVersion: kuttl.dev/v1beta1
 kind: TestStep
 commands:
-  - script: kubectl annotate service nginx -n "$NAMESPACE" tunnel.pizza/tunnel=ingress --overwrite
+  - script: kubectl label service nginx -n "$NAMESPACE" tunnel.pizza/tunnel=ingress --overwrite

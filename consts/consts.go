@@ -85,27 +85,45 @@ const (
 	ManagedBy      = "tunnel"
 )
 
-// ProtocolAnnotation is the name half of {provider}/protocol, which declares
-// how the origin behind an object is dialed. Read on a Service by the Service
-// controller and on an Ingress by the Ingress half, so the generated child
-// carries the same statement its Service made and `kubectl get ingress -o yaml`
-// shows what the annotation stood for.
+// ProtocolLabel is the name half of {provider}/protocol, which declares how the
+// origin behind an object is dialed. Read on a Service or Pod by their
+// controllers and on an Ingress or Gateway by the halves that serve them, and
+// written onto every generated child so the child says what it does.
 //
-// This is not the provider annotation that was deleted in 1b90a58 and is not
-// coming back. That one named which provider to mint from, duplicating what the
-// class name already says. This one names something no field on an Ingress can
-// express: whether the backend speaks TLS. Every ingress controller carries its
-// own spelling of it — nginx's is nginx.ingress.kubernetes.io/backend-protocol
-// — precisely because the API has no portable place for it.
+// A label, like the activation key, because this system has one metadata
+// mechanism rather than two. That has a consequence annotations did not:
+// label VALUES are validated — at most 63 characters, alphanumeric at both
+// ends. The values here are a closed set of two, both trivially valid, and
+// TestWrittenValuesAreValidLabels pins that rather than trusting it.
 //
-// Values are the appProtocol vocabulary rather than a private enumeration, so
-// a Service that already declares spec.ports[].appProtocol: https needs no
-// annotation at all.
-const ProtocolAnnotation = "protocol"
+// This is not the provider annotation deleted in 1b90a58 and is not a route
+// back to it: that one named which provider to mint from, duplicating the
+// class name, while this names something no Ingress field can express.
+//
+// Ordering, since a reader now sees two labels and a spec field all talking
+// about protocol: this label wins, then spec.ports[].appProtocol, then an
+// active probe of the origin. The spec field is unaffected by any of this and
+// stays where it is — the label is the fallback for objects that cannot express
+// it, which is why it exists alongside rather than instead of it.
+const ProtocolLabel = "protocol"
 
-// TunnelAnnotation is the name half of {provider}/tunnel, the annotation that
-// asks for a tunnel and says which API to serve it through.
-const TunnelAnnotation = "tunnel"
+// TunnelLabel is what asks for a tunnel, on a Service or a Pod, and says which
+// API to serve it through. Values: "true", "ingress", "gateway", "none".
+//
+// A LABEL, not an annotation, and one fixed key rather than {provider}/tunnel.
+// Both follow from the same constraint: the cache has to be able to select on
+// it. Label selectors AND — there is no OR across keys, and controller-runtime
+// takes one selector per kind — so "tunnel.pizza/tunnel exists OR
+// api.trycloudflare.com/tunnel exists" cannot be expressed, and a per-provider
+// key means watching every Pod in the cluster to find the few that matter.
+//
+// The cost is that this shortcut cannot choose a provider: the key says
+// tunnel.pizza, so that is what it mints from. That costs less than it looks.
+// api.trycloudflare.com is an installed IngressClass and GatewayClass already,
+// so reaching it has always been "name the class on an Ingress or Gateway",
+// and spec.loadBalancerClass can still name it directly. What is lost is a
+// provider choice the shortcut never had.
+const TunnelLabel = ProviderTunnelPizza + "/tunnel"
 
 // Flag names and their defaults.
 const (
@@ -241,7 +259,7 @@ const (
 	// OriginScheme is how the controller dials the backend Service unless the
 	// backend says otherwise. Plaintext by default: most origins are, and a
 	// wrong guess in either direction fails every request rather than
-	// degrading. What overrides it is never a guess — see ProtocolAnnotation
+	// degrading. What overrides it is never a guess — see ProtocolLabel
 	// and appProtocol.
 	OriginScheme = "http"
 	// OriginSchemeTLS dials the backend over TLS. Certificate verification is

@@ -32,8 +32,8 @@ import (
 // Kubernetes allows an optional DNS-subdomain prefix, a slash, and a name of up
 // to 63 characters.
 const (
-	annotationTunnel   = "tunnel"
-	annotationProtocol = consts.ProtocolAnnotation
+	annotationTunnel = "tunnel"
+	labelProtocol    = consts.ProtocolLabel
 )
 
 // What {provider}/tunnel may say. One annotation carrying one enumeration
@@ -187,16 +187,44 @@ func providers(svc *corev1.Service, known []string) ([]resolved, error) {
 	return out, nil
 }
 
-// Requested reports which providers an object's annotations ask for a tunnel
-// from, in a stable order.
+// fromLabels reads the activation label, which is the whole of the annotation
+// half of the trigger now.
+//
+// One fixed key, so there is no prefix to parse and no unknown-provider case:
+// a label this controller does not recognise is not its business. A tunnel
+// label with a different prefix — api.trycloudflare.com/tunnel — is therefore
+// silently not the shortcut, which is the same answer a foreign
+// loadBalancerClass gets and for the same reason.
+func fromLabels(labels map[string]string) (map[string]*request, error) {
+	value, ok := labels[consts.TunnelLabel]
+	if !ok {
+		return map[string]*request{}, nil
+	}
+
+	// The value names the API the tunnel is served through, or turns it off.
+	// Anything else is an error rather than a guess in either direction.
+	api, on, err := parseTunnel(value)
+	if err != nil {
+		return nil, fmt.Errorf("%w: label %s=%q: %v", consts.ErrUnsupported, consts.TunnelLabel, value, err)
+	}
+
+	r := &request{api: apiIngress}
+	if on {
+		r.on, r.api = true, api
+	} else {
+		r.off = true
+	}
+	return map[string]*request{consts.ProviderTunnelPizza: r}, nil
+}
+
+// Requested reports which providers an object's labels ask for a tunnel from.
 //
 // Exported for the Pod half, which shares this vocabulary exactly but has no
 // spec.loadBalancerClass, no ports to select from and no child of its own — it
-// copies the annotations onto a Service it generates and lets everything
-// downstream happen there. Sharing the parser rather than the whole resolution
-// is what keeps one definition of what these values mean.
-func Requested(annotations map[string]string, known []string) ([]string, error) {
-	requests, err := fromAnnotations(annotations, known)
+// copies the resolved value onto a Service it generates and lets everything
+// downstream happen there.
+func Requested(labels map[string]string) ([]string, error) {
+	requests, err := fromLabels(labels)
 	if err != nil {
 		return nil, err
 	}
@@ -210,73 +238,48 @@ func Requested(annotations map[string]string, known []string) ([]string, error) 
 	return wanted, nil
 }
 
-// fromAnnotations parses the {provider}/tunnel and {provider}/protocol keys.
-//
-// Shared verbatim between Services and Pods: the vocabulary is the same object
-// to object, and a second parser would be a second thing to keep in step.
-func fromAnnotations(annotations map[string]string, known []string) (map[string]*request, error) {
-	requests := map[string]*request{}
-	get := func(provider string) *request {
-		r, ok := requests[provider]
-		if !ok {
-			r = &request{api: apiIngress}
-			requests[provider] = r
-		}
-		return r
+// API reports which branch a label value asks for, for a caller that has
+// already established the object asks for anything. Used by the Pod half to
+// write the resolved branch onto the child rather than the sugar it was given:
+// a Pod labelled "true" must not produce a Service labelled "true".
+func API(labels map[string]string) string {
+	requests, err := fromLabels(labels)
+	if err != nil {
+		return string(apiIngress)
 	}
+	if r, ok := requests[consts.ProviderTunnelPizza]; ok && r.on {
+		return string(r.api)
+	}
+	return string(apiIngress)
+}
 
-	// Sorted, so an object with two bad annotations reports the same one every
-	// time rather than whichever the map yielded first.
-	for _, key := range slices.Sorted(maps.Keys(annotations)) {
-		value := annotations[key]
+// protocols reads the {provider}/protocol labels. Per-provider, unlike the
+// activation key: on a hand-written Ingress the prefix is the class it names,
+// which may be any installed provider, and there is no selector to satisfy
+// here — nothing watches on this key.
+func protocols(labels map[string]string, known []string, requests map[string]*request,
+	get func(string) *request) error {
+	for _, key := range slices.Sorted(maps.Keys(labels)) {
 		provider, name, ok := strings.Cut(key, "/")
-		if !ok {
-			// No prefix: the whole key is the name half.
-			provider, name = "", provider
-		}
-		if name != annotationTunnel && name != annotationProtocol {
+		if !ok || name != labelProtocol {
 			continue
 		}
-		if provider == "" {
-			return nil, fmt.Errorf("%w: annotation %q names no provider; the prefix is the provider, as in %s/%s",
-				consts.ErrUnsupported, key, consts.ProviderTunnelPizza, name)
-		}
 		if !slices.Contains(known, provider) {
-			return nil, fmt.Errorf("%w: annotation %q names unknown provider %q; known providers are %s",
+			return fmt.Errorf("%w: label %q names unknown provider %q; known providers are %s",
 				consts.ErrUnsupported, key, provider, strings.Join(known, ", "))
 		}
-
-		switch name {
-		case annotationTunnel:
-			// The value names the API the tunnel is served through, or turns
-			// it off. Anything else is an error rather than a silent default:
-			// "yes" and "true" are both values someone will write, and reading
-			// either as off would be indistinguishable from the controller
-			// being broken.
-			api, on, err := parseTunnel(value)
-			if err != nil {
-				return nil, fmt.Errorf("%w: annotation %s=%q: %v", consts.ErrUnsupported, key, value, err)
-			}
-			r := get(provider)
-			if on {
-				r.on, r.api = true, api
-			} else {
-				r.off = true
-			}
-		case annotationProtocol:
-			protocol, err := parseProtocol(value)
-			if err != nil {
-				return nil, fmt.Errorf("%w: annotation %s=%q: %v", consts.ErrUnsupported, key, value, err)
-			}
-			get(provider).protocol = protocol
+		protocol, err := parseProtocol(labels[key])
+		if err != nil {
+			return fmt.Errorf("%w: label %s=%q: %v", consts.ErrUnsupported, key, labels[key], err)
 		}
+		get(provider).protocol = protocol
 	}
-	return requests, nil
+	return nil
 }
 
 // requested reads both triggers into one map, keyed by provider.
 func requested(svc *corev1.Service, known []string) (map[string]*request, error) {
-	requests, err := fromAnnotations(svc.Annotations, known)
+	requests, err := fromLabels(svc.Labels)
 	if err != nil {
 		return nil, err
 	}
@@ -289,36 +292,36 @@ func requested(svc *corev1.Service, known []string) (map[string]*request, error)
 		return r
 	}
 
-	// spec.loadBalancerClass carries the provider directly. Dotted values are
-	// legal there — it is validated as a qualified name, and both
-	// "tunnel.pizza" and "api.trycloudflare.com" are accepted by the API server
-	// — so the vocabulary needs no mangling on this path.
+	// spec.loadBalancerClass carries the provider directly, and is the one path
+	// that can still choose one — the label cannot. Dotted values are legal
+	// there: it is validated as a qualified name, and both "tunnel.pizza" and
+	// "api.trycloudflare.com" are accepted by the API server.
 	//
 	// Only read when spec.type is LoadBalancer, and there is nothing to handle
 	// for the other combination: the API server rejects loadBalancerClass on a
-	// Service of any other type outright ("Forbidden: may only be used when
-	// `type` is 'LoadBalancer'"), so it cannot reach a controller. The type
-	// check is here to say that, not to defend against it.
+	// Service of any other type outright, so it cannot reach a controller. The
+	// type check is here to say that, not to defend against it.
 	if svc.Spec.Type == corev1.ServiceTypeLoadBalancer && svc.Spec.LoadBalancerClass != nil {
 		class := *svc.Spec.LoadBalancerClass
-		// An unknown class here is silently not ours, which is the opposite of
-		// the annotation case above and deliberate. loadBalancerClass is the
+		// An unknown class here is silently not ours. loadBalancerClass is the
 		// established way a Service says which load-balancer implementation
 		// owns it, so a value we do not recognise names somebody else's
 		// controller — MetalLB, a cloud provider, kube-vip — and complaining
-		// about it would put a warning on every foreign LoadBalancer Service in
-		// the cluster. An unrecognised {prefix}/tunnel annotation has no such
-		// owner: nothing else in the ecosystem defines that key, so it is a
-		// typo of ours and worth saying so.
+		// would put a warning on every foreign LoadBalancer Service in the
+		// cluster.
 		if slices.Contains(known, class) {
 			get(class).on = true
 		}
 	}
 
+	if err := protocols(svc.Labels, known, requests, get); err != nil {
+		return nil, err
+	}
+
 	// A protocol naming a provider that no trigger asked for is config that
 	// will never be read. Almost always a half-finished edit, so it is worth a
 	// word. A provider explicitly turned off still counts as named — keeping
-	// the protocol line while switching tunnel to "none" is exactly what the
+	// the protocol line while switching the label to "none" is exactly what the
 	// explicit off is for.
 	for _, provider := range slices.Sorted(maps.Keys(requests)) {
 		r := requests[provider]
@@ -326,8 +329,8 @@ func requested(svc *corev1.Service, known []string) (map[string]*request, error)
 			continue
 		}
 		if r.protocol != "" {
-			return nil, fmt.Errorf("%w: annotation %s/%s names no tunnel; add %s/%s: %q",
-				consts.ErrUnsupported, provider, annotationProtocol, provider, annotationTunnel, apiIngress)
+			return nil, fmt.Errorf("%w: label %s/%s names no tunnel; add label %s: %q",
+				consts.ErrUnsupported, provider, labelProtocol, consts.TunnelLabel, apiIngress)
 		}
 	}
 

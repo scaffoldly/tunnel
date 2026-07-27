@@ -249,7 +249,7 @@ func TestScheme(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ing := &networkingv1.Ingress{
-				ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "web", Annotations: tc.annotations},
+				ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "web", Labels: tc.annotations},
 			}
 			if tc.class != "" {
 				ing.Spec.IngressClassName = &tc.class

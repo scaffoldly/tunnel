@@ -104,6 +104,76 @@ Adjacent facts from the same session, expensive to rediscover:
   are accepted as `loadBalancerClass`. It is validated as a qualified name, and
   dots are legal in the name half, so the provider vocabulary needs no mangling.
 
+## Activation is a LABEL, and there are no annotations anywhere
+
+`tunnel.pizza/tunnel: true | ingress | gateway | none` — a **label**, on a
+Service or a Pod. `{provider}/protocol: http | https` is a label too, read from
+the objects it appears on and written onto every generated child. The
+controller reads no annotations and writes none.
+
+**Why a label, and why one fixed key.** Both follow from wanting the cache to
+select on it. Label selectors AND — no OR across keys — and controller-runtime
+takes one selector per kind, so `tunnel.pizza/tunnel exists OR
+api.trycloudflare.com/tunnel exists` is inexpressible, and a per-provider key
+would mean watching every Pod in the cluster to find the few that matter.
+
+**The cost: the shortcut cannot choose a provider.** The key says
+`tunnel.pizza`, so that is what it mints from. That costs less than it looks —
+`api.trycloudflare.com` is an installed IngressClass *and* GatewayClass, so
+reaching it has always been "name the class", and `spec.loadBalancerClass` can
+still name it directly. Two providers on one Service is therefore still
+possible, through the two different triggers rather than two labels.
+
+**The cache asymmetry is deliberate and is tested.** Pods are restricted by an
+`Exists` selector on the label; **Services are not, and must not be**. A Service
+can ask through `spec.loadBalancerClass`, which lives in the spec where no
+selector can see it, so a restricted Services cache would silently stop
+delivering those Services and that trigger would just stop working — no error,
+no event, no reconcile. `TestCacheOptionsRestrictPodsOnly` fails if either half
+is changed, because this looks like an oversight and will otherwise be "fixed".
+
+### Removing the label arrives as a DELETE, not an UPDATE — measured
+
+This was the one thing here that could be subtly and silently wrong, so it was
+settled by experiment rather than by reading. When an object stops matching a
+watch's label selector, the API server delivers a synthetic **DELETED** carrying
+the *last matching state* — which still has the label, so the predicate's
+`asks()` is true and it enqueues. Reconcile then reads the object, finds it no
+longer asks, and prunes.
+
+Two mutations against the live e2e establish it, and neither could be inferred
+from the suite merely passing:
+
+- `UpdateFunc` narrowed to `asks(e.ObjectNew)` — **still passes**, so the
+  removal is not reaching us as an update that old-or-new logic rescued.
+- `DeleteFunc` forced to `false` — **fails**, hanging the full 205s step
+  timeout with the children still there.
+
+Together those also prove the `ByObject` label selector really is applied to a
+**metadata** informer, which was the other open question: an unrestricted cache
+would have delivered an ordinary UPDATE and the first mutation would have
+failed.
+
+`UpdateFunc`'s old-or-new check stays anyway. It is what covers the unrestricted
+case, which is where Services are.
+
+### Label values are validated where annotation values were not
+
+At most 63 characters, alphanumeric at both ends. Everything this controller
+writes into a label is a closed set of constants, and
+`TestWrittenValuesAreValidLabels` pins that rather than trusting it — the whole
+set would pass a careless review and fail on a cluster.
+
+**`spec.ports[].appProtocol` is unaffected.** Order is: the `{provider}/protocol`
+label, then `appProtocol`, then an active probe of the origin.
+`TestProtocolPrecedence` exists because a mechanical rewrite across 65 table
+cases can flip that without any fixture noticing — most fixtures agree with each
+other, so only a case where the two *disagree* can catch it.
+
+**The sugar does not leak.** A Pod labelled `true` produces a child labelled
+`ingress`. `true` is an input spelling; everything the controller emits says
+what it actually did.
+
 ## Phase 3: the Gateway branch
 
 `{provider}/tunnel: "gateway"` reconciles a **Gateway and an HTTPRoute**, both

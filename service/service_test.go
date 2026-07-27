@@ -70,14 +70,14 @@ func reconcilerWithProbe(t *testing.T, probe Prober, objs ...client.Object) (*Re
 }
 
 // annotated is a ClusterIP Service asking for a tunnel the ordinary way.
-func annotated(annotations map[string]string, ports ...corev1.ServicePort) *corev1.Service {
+func annotated(labels map[string]string, ports ...corev1.ServicePort) *corev1.Service {
 	if ports == nil {
 		ports = []corev1.ServicePort{{Name: "http", Port: 8080, Protocol: corev1.ProtocolTCP}}
 	}
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: testKey.Namespace, Name: testKey.Name,
-			UID: "svc-uid", Annotations: annotations,
+			UID: "svc-uid", Labels: labels,
 		},
 		Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, Ports: ports},
 	}
@@ -213,8 +213,8 @@ func TestReconcileLeavesAnAnnotatedServiceUntouched(t *testing.T) {
 		t.Errorf("status.loadBalancer.ingress = %+v, want empty on the annotation path",
 			svc.Status.LoadBalancer.Ingress)
 	}
-	if len(svc.Annotations) != 1 {
-		t.Errorf("annotations = %v, want only the user's own", svc.Annotations)
+	if len(svc.Labels) != 1 {
+		t.Errorf("labels = %v, want only the user's own", svc.Labels)
 	}
 }
 
@@ -303,7 +303,7 @@ func TestReconcileDeletesTheChildWhenTheTriggerGoes(t *testing.T) {
 	}
 
 	svc := getService(t, c)
-	svc.Annotations = nil
+	svc.Labels = nil
 	if err := c.Update(context.Background(), svc); err != nil {
 		t.Fatalf("remove annotation: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestReconcileDeletesTheChildWhenTurnedOff(t *testing.T) {
 	}
 
 	svc := getService(t, c)
-	svc.Annotations = map[string]string{"tunnel.pizza/tunnel": "none"}
+	svc.Labels = map[string]string{"tunnel.pizza/tunnel": "none"}
 	if err := c.Update(context.Background(), svc); err != nil {
 		t.Fatalf("annotate off: %v", err)
 	}
@@ -349,10 +349,13 @@ func TestReconcileDeletesTheChildWhenTurnedOff(t *testing.T) {
 // TestReconcileTwoProvidersTwoChildren is decision 4, and it is the reason
 // child names carry the provider at all.
 func TestReconcileTwoProvidersTwoChildren(t *testing.T) {
-	r, c, _ := reconciler(t, annotated(map[string]string{
-		"tunnel.pizza/tunnel":          "ingress",
-		"api.trycloudflare.com/tunnel": "ingress",
-	}))
+	// The label names one provider; the second comes from the class, which is
+	// the only trigger that can still choose one.
+	svc := annotated(map[string]string{"tunnel.pizza/tunnel": "ingress"})
+	svc.Spec.Type = corev1.ServiceTypeLoadBalancer
+	class := "api.trycloudflare.com"
+	svc.Spec.LoadBalancerClass = &class
+	r, c, _ := reconciler(t, svc)
 
 	if _, err := r.Reconcile(context.Background(), reconcileRequest()); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
@@ -400,7 +403,7 @@ func TestReconcileRefusesAnUnresolvableService(t *testing.T) {
 	}
 
 	svc := getService(t, c)
-	svc.Annotations["tunnel.pizza/tunnel"] = "yes"
+	svc.Labels["tunnel.pizza/tunnel"] = "yes"
 	if err := c.Update(context.Background(), svc); err != nil {
 		t.Fatalf("update annotation: %v", err)
 	}
@@ -587,7 +590,7 @@ func TestReconcileRefusesGatewayWithoutTheCRDs(t *testing.T) {
 // genuinely different work per branch.
 func TestReconcilePublishesTheGatewaysAddress(t *testing.T) {
 	svc := classed("tunnel.pizza")
-	svc.Annotations = map[string]string{"tunnel.pizza/tunnel": "gateway"}
+	svc.Labels = map[string]string{"tunnel.pizza/tunnel": "gateway"}
 	r, c, _ := reconciler(t, svc)
 
 	if _, err := r.Reconcile(context.Background(), reconcileRequest()); err != nil {
@@ -611,7 +614,7 @@ func TestReconcilePublishesTheGatewaysAddress(t *testing.T) {
 // nothing whenever the class happens to agree on the provider.
 func TestReconcileAnnotationBeatsLoadBalancerClassOnAPI(t *testing.T) {
 	svc := classed("tunnel.pizza")
-	svc.Annotations = map[string]string{"tunnel.pizza/tunnel": "gateway"}
+	svc.Labels = map[string]string{"tunnel.pizza/tunnel": "gateway"}
 	r, c, _ := reconciler(t, svc)
 
 	if _, err := r.Reconcile(context.Background(), reconcileRequest()); err != nil {
@@ -808,7 +811,7 @@ func TestReconcileProbesAnUndeclaredOrigin(t *testing.T) {
 	if want := "web.default.svc:8080"; probed != want {
 		t.Errorf("probed %q, want the origin the tunnel will front, %q", probed, want)
 	}
-	if got := getIngress(t, c, "web-tunnel-pizza").Annotations["tunnel.pizza/protocol"]; got != consts.OriginSchemeTLS {
+	if got := getIngress(t, c, "web-tunnel-pizza").Labels["tunnel.pizza/protocol"]; got != consts.OriginSchemeTLS {
 		t.Errorf("child protocol = %q, want %q from the probe", got, consts.OriginSchemeTLS)
 	}
 	assertEvent(t, recorder, consts.ReasonProtocol)
@@ -859,7 +862,7 @@ func TestReconcileDoesNotProbeWhatTheServiceDeclared(t *testing.T) {
 			if probed {
 				t.Error("probed an origin the Service already declared")
 			}
-			if got := getIngress(t, c, "web-tunnel-pizza").Annotations["tunnel.pizza/protocol"]; got != tc.want {
+			if got := getIngress(t, c, "web-tunnel-pizza").Labels["tunnel.pizza/protocol"]; got != tc.want {
 				t.Errorf("child protocol = %q, want %q", got, tc.want)
 			}
 		})
@@ -880,7 +883,7 @@ func TestReconcileWarnsWhenTheOriginCannotBeReached(t *testing.T) {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 
-	if got := getIngress(t, c, "web-tunnel-pizza").Annotations["tunnel.pizza/protocol"]; got != consts.OriginScheme {
+	if got := getIngress(t, c, "web-tunnel-pizza").Labels["tunnel.pizza/protocol"]; got != consts.OriginScheme {
 		t.Errorf("child protocol = %q, want the plaintext default", got)
 	}
 	// Nothing else brings us back: a backend becoming ready is not an event on
@@ -926,7 +929,7 @@ func TestReconcileUpdatesAChildWhoseProtocolChanged(t *testing.T) {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 
-	if got := getIngress(t, c, "web-tunnel-pizza").Annotations["tunnel.pizza/protocol"]; got != consts.OriginSchemeTLS {
+	if got := getIngress(t, c, "web-tunnel-pizza").Labels["tunnel.pizza/protocol"]; got != consts.OriginSchemeTLS {
 		t.Errorf("child protocol = %q, want %q — the corrected probe never reached it", got, consts.OriginSchemeTLS)
 	}
 }
@@ -979,10 +982,10 @@ func routeNames(t *testing.T, c client.Client) []string {
 func setAnnotation(t *testing.T, c client.Client, key, value string) {
 	t.Helper()
 	svc := getService(t, c)
-	if svc.Annotations == nil {
-		svc.Annotations = map[string]string{}
+	if svc.Labels == nil {
+		svc.Labels = map[string]string{}
 	}
-	svc.Annotations[key] = value
+	svc.Labels[key] = value
 	if err := c.Update(context.Background(), svc); err != nil {
 		t.Fatalf("update service: %v", err)
 	}
@@ -1062,9 +1065,7 @@ func TestTrueAndIngressProduceIdenticalChildren(t *testing.T) {
 	if fromTrue.Name != fromIngress.Name {
 		t.Errorf("names differ: %q vs %q", fromTrue.Name, fromIngress.Name)
 	}
-	if !apiequality.Semantic.DeepEqual(fromTrue.Annotations, fromIngress.Annotations) {
-		t.Errorf("annotations differ:\n true    %v\n ingress %v", fromTrue.Annotations, fromIngress.Annotations)
-	}
+
 	if !apiequality.Semantic.DeepEqual(fromTrue.Labels, fromIngress.Labels) {
 		t.Errorf("labels differ:\n true    %v\n ingress %v", fromTrue.Labels, fromIngress.Labels)
 	}

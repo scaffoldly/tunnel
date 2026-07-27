@@ -46,7 +46,6 @@ import (
 	"fmt"
 	"path"
 	"reflect"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -133,17 +132,13 @@ func triggered() predicate.Predicate {
 	}
 }
 
-// asks reports whether an object carries any {provider}/tunnel annotation,
-// whatever it says. Deliberately not "asks for a tunnel": a value of "none" or
-// a typo still has to reach the reconciler, which is what reports it or cleans
-// up after it.
+// asks reports whether an object carries the activation label at all, whatever
+// it says. Deliberately not "asks for a tunnel": a value of "none" or a typo
+// still has to reach the reconciler, which is what reports it or cleans up
+// after it.
 func asks(obj client.Object) bool {
-	for key := range obj.GetAnnotations() {
-		if _, name, ok := strings.Cut(key, "/"); ok && name == consts.TunnelAnnotation {
-			return true
-		}
-	}
-	return false
+	_, ok := obj.GetLabels()[consts.TunnelLabel]
+	return ok
 }
 
 // Reconcile brings the Service fronting one Pod into line with what the Pod
@@ -166,7 +161,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, nil
 	}
 
-	wanted, err := service.Requested(pod.Annotations, r.Providers)
+	wanted, err := service.Requested(pod.Labels)
 	if err != nil {
 		// Unsupported by construction: this reads one object's annotations and
 		// reaches nothing else, so no retry changes the answer.
