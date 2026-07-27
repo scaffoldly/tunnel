@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -113,6 +114,7 @@ func installClass(ctx context.Context, c client.Client, provider string, owner *
 func scheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(s))
+	utilruntime.Must(apiextensionsv1.AddToScheme(s))
 	utilruntime.Must(gatewayv1.Install(s))
 	return s
 }

@@ -96,7 +96,7 @@ func New(mgr ctrl.Manager, cfg config.Config) error {
 		return fmt.Errorf("setup ingress controller: %w", err)
 	}
 
-	if cfg.Install {
+	if cfg.InstallIngressClasses {
 		if err := mgr.Add(&installer{cfg: cfg}); err != nil {
 			return fmt.Errorf("add ingressclass installer: %w", err)
 		}

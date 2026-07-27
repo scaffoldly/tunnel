@@ -51,7 +51,12 @@ func main() {
 	// Two replicas both minting tunnels for one Ingress would leak a tunnel per
 	// reconcile, so this must be on before replicas > 1.
 	flag.BoolVar(&leaderElect, consts.FlagLeaderElect, false, "enable leader election for controller manager")
-	flag.BoolVar(&cfg.Install, consts.FlagInstall, true, "create default IngressClasses and GatewayClasses on startup")
+	flag.BoolVar(&cfg.InstallIngressClasses, consts.FlagInstallIngressClasses, true,
+		"create default IngressClasses on startup")
+	flag.BoolVar(&cfg.InstallGatewayClasses, consts.FlagInstallGatewayClasses, true,
+		"create default GatewayClasses on startup")
+	flag.BoolVar(&cfg.InstallGatewayAPI, consts.FlagInstallGatewayAPI, true,
+		"install the Gateway API CRDs when the cluster has none")
 
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)

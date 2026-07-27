@@ -65,7 +65,14 @@ const (
 	FlagMetricsAddr = "metrics-bind-address"
 	FlagProbeAddr   = "health-probe-bind-address"
 	FlagLeaderElect = "leader-elect"
-	FlagInstall     = "install"
+
+	// Three switches rather than one, because they carry very different
+	// blast radii: the class flags create objects only this controller
+	// claims, while installing the Gateway API writes cluster-scoped CRDs
+	// that every implementation in the cluster reads.
+	FlagInstallIngressClasses = "install-ingress-classes"
+	FlagInstallGatewayClasses = "install-gateway-classes"
+	FlagInstallGatewayAPI     = "install-gateway-api"
 
 	DefaultMetricsAddr = ":8080"
 	DefaultProbeAddr   = ":8081"

@@ -1,0 +1,19 @@
+# Mirrors the ingress suite. The controller mints these at startup via
+# --install, but only on a cluster serving the Gateway API — the suite installs
+# the CRDs before the chart for exactly this reason.
+#
+# spec.controllerName is the contract, derived by reflection from the gateway
+# package's import path and checked nowhere at build time.
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: tunnel.pizza
+spec:
+  controllerName: github.com/scaffoldly/tunnel/gateway
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: api.trycloudflare.com
+spec:
+  controllerName: github.com/scaffoldly/tunnel/gateway

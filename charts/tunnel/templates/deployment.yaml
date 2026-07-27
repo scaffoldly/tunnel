@@ -44,9 +44,15 @@ spec:
           {{- with .Values.image.pullPolicy }}
           imagePullPolicy: {{ . }}
           {{- end }}
-          {{- if not .Values.install }}
+          {{- $args := list }}
+          {{- if not .Values.install.ingressClasses }}{{ $args = append $args "--install-ingress-classes=false" }}{{ end }}
+          {{- if not .Values.install.gatewayClasses }}{{ $args = append $args "--install-gateway-classes=false" }}{{ end }}
+          {{- if not .Values.install.gatewayAPI }}{{ $args = append $args "--install-gateway-api=false" }}{{ end }}
+          {{- with $args }}
           args:
-            - --install=false
+            {{- range . }}
+            - {{ . }}
+            {{- end }}
           {{- end }}
           ports:
             - name: metrics

@@ -14,13 +14,25 @@ import (
 
 // Config is resolved from flags once, in main, and passed to each New.
 type Config struct {
-	// Install has the controller create default IngressClasses and
-	// GatewayClasses at startup, so the shipped manifest is a Deployment and
-	// its RBAC rather than a list of classes.
+	// InstallIngressClasses has the controller create its default
+	// IngressClasses at startup, so the shipped manifest is a Deployment and
+	// its RBAC rather than a list of classes. Off when they are managed
+	// elsewhere — Helm, Argo, anything that would fight over ownership.
+	InstallIngressClasses bool
+
+	// InstallGatewayClasses is the same for GatewayClasses. Separate because a
+	// cluster can want one API's classes and not the other's.
+	InstallGatewayClasses bool
+
+	// InstallGatewayAPI has the controller install the Gateway API CRDs where
+	// a cluster has none.
 	//
-	// Turn it off when the classes are managed elsewhere — Helm, Argo, or any
-	// other reconciler that would fight over ownership.
-	Install bool
+	// Its own switch, and the one worth turning off deliberately: the CRDs are
+	// cluster-scoped and shared by every Gateway API implementation present,
+	// so this is the only install that can affect software this controller did
+	// not deploy. A cluster running Istio or Cilium already has them, and
+	// should own them.
+	InstallGatewayAPI bool
 }
 
 // saPrefix begins the username the API server gives a ServiceAccount:

@@ -51,6 +51,25 @@ var ReporterName = consts.Reporter(string(ControllerName))
 // serve fails to start outright. An Ingress-only cluster gets a log line
 // instead of a crash loop.
 func New(mgr ctrl.Manager, cfg config.Config) error {
+	// Before the probe, not after: the probe is what decides whether anything
+	// registers, and a Runnable would not run until the manager had already
+	// started without these watches.
+	//
+	// Its own client for the same reason the class installer has one — the
+	// manager's reads go through a cache that has not synced at setup time.
+	if cfg.InstallGatewayAPI {
+		c, err := client.New(mgr.GetConfig(), client.Options{Scheme: scheme()})
+		if err != nil {
+			return fmt.Errorf("build crd client: %w", err)
+		}
+		if err := installCRDs(context.Background(), c); err != nil {
+			return fmt.Errorf("install gateway api crds: %w", err)
+		}
+		if err := awaitEstablished(context.Background(), c); err != nil {
+			return fmt.Errorf("await gateway api crds: %w", err)
+		}
+	}
+
 	ok, err := installed(mgr)
 	if err != nil {
 		return fmt.Errorf("detect gateway api: %w", err)
@@ -72,7 +91,7 @@ func New(mgr ctrl.Manager, cfg config.Config) error {
 		return fmt.Errorf("setup gateway controller: %w", err)
 	}
 
-	if cfg.Install {
+	if cfg.InstallGatewayClasses {
 		if err := mgr.Add(&installer{cfg: cfg}); err != nil {
 			return fmt.Errorf("add gatewayclass installer: %w", err)
 		}

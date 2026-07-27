@@ -1,0 +1,15 @@
+# FAILING ON PURPOSE, and unreachable until 01-assert passes: there is no
+# address to fetch. Same two scripts as the ingress suite, so the day gateway
+# provisioning lands this needs no rewriting.
+apiVersion: kuttl.dev/v1beta1
+kind: TestStep
+commands:
+  - script: |
+      host=$(kubectl get gateway nginx -n "$NAMESPACE" -o jsonpath='{.status.addresses[0].value}')
+      test -n "$host" || { echo "no address published on gateway/nginx" >&2; exit 1; }
+      curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "http://$host/" | grep -q 'Welcome to nginx'
+
+  - script: |
+      host=$(kubectl get gateway nginx -n "$NAMESPACE" -o jsonpath='{.status.addresses[0].value}')
+      test -n "$host" || { echo "no address published on gateway/nginx" >&2; exit 1; }
+      curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "https://$host/" | grep -q 'Welcome to nginx'

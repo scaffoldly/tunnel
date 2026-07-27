@@ -10,3 +10,7 @@
 !**/*.go
 !go.mod
 !go.sum
+
+# Embedded by gateway/crds.go. Without this go:embed fails the build, which is
+# the loud failure an allow-list is chosen for.
+!gateway/crds/*.yaml

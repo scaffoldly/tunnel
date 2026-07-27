@@ -7,10 +7,14 @@ image:
   # loudly instead of pulling the published one.
   pullPolicy: ""
 
-# Have the controller create the default IngressClass and GatewayClass at
-# startup. On is the controller's own default and renders no args; off renders
-# --install=false.
-install: true
+# Each is a separate switch because the blast radii differ. The class flags
+# create objects only this controller claims; gatewayAPI writes cluster-scoped
+# CRDs that every Gateway API implementation in the cluster reads, so a cluster
+# running Istio or Cilium should turn it off and own them itself.
+install:
+  ingressClasses: true
+  gatewayClasses: true
+  gatewayAPI: true
 
 namespace:
   # Render a Namespace object. Off for `helm install`, which places objects with

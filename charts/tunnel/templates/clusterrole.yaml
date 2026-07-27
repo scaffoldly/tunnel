@@ -49,6 +49,20 @@ capability brings its rules in the same commit as the code that calls them.
                                  shows these; the API server serves one store
                                  through both endpoints.
 
+  customresourcedefinitions      --install bundles the Gateway API CRDs and
+    (get/list/watch/create/update) installs them where a cluster has none, so a
+                                 Gateway-API-less cluster is usable without a
+                                 second install step. get to compare, create to
+                                 add, update only to upgrade an older bundle of
+                                 the same channel.
+
+                                 No delete, and that is load-bearing rather than
+                                 minimalism: upstream's rules for bundling say
+                                 never remove Gateway API CRDs, because several
+                                 implementations share one set and deleting them
+                                 destroys every Gateway object in the cluster.
+                                 Withholding the verb means a bug cannot do it.
+
 Deliberately absent:
 
   coordination.k8s.io/leases     --leader-elect defaults to false and the
@@ -96,3 +110,6 @@ rules:
   - apiGroups: ["events.k8s.io"]
     resources: ["events"]
     verbs: ["create", "patch"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch", "create", "update"]

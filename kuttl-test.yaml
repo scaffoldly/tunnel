@@ -27,6 +27,10 @@ commands:
   # cluster and the pull below fails somewhere confusing.
   - command: kind load docker-image ghcr.io/scaffoldly/tunnel:e2e --name tunnel-e2e
 
+  # No Gateway API CRDs are installed here on purpose. --install bundles them
+  # and the controller puts them in itself, so a kind cluster with none is
+  # exactly the case worth testing.
+
   # The chart in this tree, not a published one: these tests exist to catch a
   # chart that stopped installing, and a remote chart could not.
   #

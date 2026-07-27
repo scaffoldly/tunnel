@@ -1,0 +1,32 @@
+# This step is expected to fail until gateway provisioning exists, so it waits
+# a fraction of the suite timeout. Minting is what needs 180s, and nothing here
+# mints — waiting longer only slows down finding out what we already know.
+apiVersion: kuttl.dev/v1beta1
+kind: TestAssert
+timeout: 15
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+status:
+  readyReplicas: 1
+---
+# FAILING ON PURPOSE. Gateway provisioning is not implemented: a matching
+# Gateway gets an Unimplemented event and no address. This is the shape the
+# Ingress half already delivers, written down as the target rather than left
+# in a tracker.
+#
+# status.addresses is the Gateway API's equivalent of the Ingress's
+# status.loadBalancer — where the implementing controller states the address it
+# serves on. Type Hostname because a tunnel has no routable IP.
+#
+# Deleting this test to make the suite green would be the wrong fix; the right
+# one is gateway/gateway.go.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: nginx
+status:
+  addresses:
+    - type: Hostname
