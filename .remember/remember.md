@@ -5,7 +5,7 @@ Where the two overlap the definition wins, **except where this file says the
 definition is out of date**. The one place that mattered — the provider
 annotation cascade — has since been corrected in the definition itself.
 
-## State — HEAD `5250558`, pushed, CI green, working tree clean
+## State — HEAD `9f7e5d0`, pushed, CI green, working tree clean
 
 In order: `1b90a58` Ingress provisioning with libtunnel, `28b8f31`
 served ports in status, `21e9ba0` ownerReferences on installed classes,
@@ -13,7 +13,7 @@ served ports in status, `21e9ba0` ownerReferences on installed classes,
 bundled Gateway API CRDs + `--install` split into three, `b4143ff` CRD bundle
 generated from the module, `6f572e3` Gateway provisioning, `502deca`
 GatewayClass Accepted + its tests, `5250558` the prose sweep and the
-regenerated manifest.
+regenerated manifest, `9f7e5d0` GatewayClass SupportedVersion.
 
 **Both halves provision.** Ingress and Gateway each mint a real tunnel and
 publish the hostname — Ingress to `status.loadBalancer.ingress[].hostname`,
@@ -116,9 +116,11 @@ Sourced from the module the compiler resolved, **not** a release URL: no
 network, no chance of the file and the compiled types naming different
 releases, and it follows a `replace` if there ever is one. `go:embed` cannot
 reach into a dependency, hence the vendored copy; the upstream Apache notice is
-carried deliberately. `TestBundleVersionMatchesGoMod` pins `bundledVersion`
-(`v1.6.1`) against the file, so `make crds` after a go.mod bump is not something
-anyone has to remember. `.dockerignore` is an allow-list and re-includes
+carried deliberately. `bundledVersion` is `gatewayconsts.BundleVersion` — the
+module's own release constant, not a string maintained here — and
+`TestBundleVersionMatchesGoMod` pins the embedded file against it, so `make
+crds` after a go.mod bump is not something anyone has to remember.
+`.dockerignore` is an allow-list and re-includes
 `gateway/crds/zz_generated.*.yaml` by negation — that is why `Dockerfile` line 1
 is `# check=skip=CopyIgnoredFile`.
 
@@ -170,14 +172,25 @@ and https.
   nothing. `go mod tidy` leaves `go.mod`/`go.sum` unchanged. `actionlint` clean.
 - `docker buildx build --platform linux/amd64,linux/arm64 --output=type=cacheonly .`
   — succeeds, cross-compiled from one native build stage via TARGETOS/TARGETARCH.
-- `make test-e2e` — `PASS: kuttl (83.14s)`, `gateway (21.73s)`, `ingress (20.67s)`,
-  including the new GatewayClass `Accepted` assert. Real tunnels minted and both
-  schemes served nginx. An earlier run before the sweep: `71.39s` / `15.61s` /
-  `19.63s`.
-- The negative run matters as much: with `00-assert` deliberately set back to
-  `False`/`Waiting`, `kubectl kuttl test --test gateway` fails in `step 0` with
+- `make test-e2e` — green on every run: `83.14s` with the `Accepted` assert,
+  then `gateway (15.62s)` / `ingress (20.64s)` with `SupportedVersion` added.
+  Real tunnels minted and both schemes served nginx each time.
+- The negative runs matter as much, and there is one per condition. Flip the
+  assert and `kubectl kuttl test --test gateway` fails in `step 0` —
   `.status.conditions.status: value mismatch, expected: False != actual: True`
-  and never reaches the mint. Cheap to repeat, costs the provider nothing.
+  for `Accepted`, `.status.conditions.reason: ... expected: UnsupportedVersion
+  != actual: SupportedVersion` for the other — and never reaches the mint, so
+  re-checking either costs the provider nothing.
+- What the real cluster publishes, from the kuttl diff rather than a unit test:
+
+      Accepted=True/Accepted
+        Gateways on this class get a tunnel minted from https://tunnel.pizza/tunnel
+      SupportedVersion=True/SupportedVersion
+        Gateway API CRDs are at v1.6.1, which this controller supports (v1.6.x)
+
+  Both with `observedGeneration: 1`. That the second exists at all is the proof
+  that a metadata-only `PartialObjectMetadataList` read works through
+  `mgr.GetAPIReader()` — nothing else exercises that path.
 - `curl -sI -H 'Accept: */*' https://tunnel.pizza` → `307` →
   `raw.githubusercontent.com/scaffoldly/tunnel/main/install.yaml`, which returns
   `200`, `cache-control: max-age=300`. The served body is byte-identical to
@@ -232,27 +245,70 @@ Gateway takes its backend from the HTTPRoutes that name it (so it has no
 address until one exists), and the Gateway API CRDs are installed if they have
 none.
 
-## One real gap left, and one spec MUST not implemented
+## GatewayClass conditions are complete — the policy, and where it came from
 
-**`SupportedVersion` is never published.** Gateway API says a controller that
-marks a GatewayClass `Accepted` MUST also set `SupportedVersion`
-(`gatewayv1.GatewayClassConditionStatusSupportedVersion`, reasons
-`SupportedVersion` / `UnsupportedVersion`). `502deca` deliberately did not add
-it: doing it honestly means reading the CRDs' `bundle-version` annotation at
-runtime and deciding a support policy against `bundledVersion`, which is a
-decision, not a two-line change. The RBAC already allows the read
-(`customresourcedefinitions` get/list/watch). Until it lands we are accepting
-classes without the companion condition the spec requires.
+Both conditions the spec requires are published and asserted. `SupportedVersion`
+landed in `9f7e5d0`; the policy is documented at length on `checkVersions` in
+`gateway/crds.go`, and this is the short version plus the reasoning that does
+not belong in a doc comment.
 
-The `Accepted` condition itself is now correct and guarded: `Accepted=True`,
+- **Input is fixed by upstream**, not chosen: the version of a Gateway API CRD
+  *is* its `gateway.networking.k8s.io/bundle-version` annotation.
+- **Compared on major.minor, patch ignored.** Upstream's versioning policy
+  forbids schema changes in a patch, so pinning the patch would report a
+  cluster unsupported over a difference that cannot reach us. This is also what
+  nginx-gateway-fabric does (`internal/controller/state/graph/gatewayclass.go`,
+  `validateCRDVersions`) — worth reading if the policy is ever revisited.
+- **A missing annotation is `False`, not an exemption.** This is the one that
+  reads wrong at first and is nevertheless what the spec says: "CRDs that
+  either do not have this annotation set, **or** have it set to a version that
+  is not recognized ... MUST be set to false." An implementation cannot vouch
+  for CRDs it cannot identify. The distinction between "wrong version" and "no
+  annotation" lives in the message, which is where upstream puts it.
+- **`Accepted` stays `True` regardless** — the "best effort" one of the two
+  behaviours upstream permits. The alternative is what NGF does, and
+  nginx/nginx-gateway-fabric#4762 is a user whose working cluster was refused
+  over exactly this. Refusing a class whose Gateways provision is the bug
+  `502deca` fixed; re-introducing it through the version check would be the
+  same bug wearing a different hat.
+- **Every Gateway API CRD counts**, including kinds this controller never
+  reads. A stale `v0.x` TCPRoute left in a cluster flips the condition and gets
+  named in the message. That is diagnosable and costs nothing, because it does
+  not stop provisioning.
+- **Channel is not part of it.** Experimental at our version is a superset of
+  our schema. `installCRDs` cares about the channel because *writing* across
+  channels drops data; reading does not.
+
+Two implementation notes that are easy to undo by accident. The read is
+metadata-only (`metav1.PartialObjectMetadataList`) through the manager's
+**uncached** reader: an informer on CustomResourceDefinition caches every CRD
+schema in the cluster, which on a cluster running cert-manager or Istio is more
+memory than the rest of this controller. The cost is that a CRD upgrade under a
+running controller does not refresh the condition until the class is touched or
+the process restarts, which is documented on the `CRDs` field. And
+`bundledVersion` is now `gatewayconsts.BundleVersion` — the module's own
+constant — so a gateway-api bump no longer needs it edited; `make crds` and the
+version literals in `gateway_test.go` are the only manual steps, and
+`TestSupportedVersionsPin` is what tells you.
+
+The `Accepted` condition itself is correct and guarded: `Accepted=True`,
 reason `Accepted`, `observedGeneration`, message naming the provider. Tests in
 `gateway/gateway_test.go` plus the gateway e2e `00-assert`. Both were checked
 by mutation, and the e2e one fails at step 0 before any tunnel is minted, so
-breaking it costs no provider load. **Assertions there are written against the
-literal `"Accepted"`, not `gatewayv1.GatewayClassReasonAccepted`** — an
-assertion phrased in the code's own constants would have passed just as
-happily against the `False`/`Waiting` condition that shipped for a release.
-`TestAcceptedConditionMatchesTheSpec` pins the literals to upstream.
+breaking it costs no provider load. **Assertions for both conditions are
+written against literals — `"Accepted"`, `"SupportedVersion"`, `"v1.6.1"` — not
+against the constants the controller uses** — an assertion phrased in the
+code's own constants would have passed just as happily against the
+`False`/`Waiting` condition that shipped for a release.
+`TestConditionsMatchTheSpec` pins the condition literals to upstream and
+`TestSupportedVersionsPin` pins the version ones to the build, so a rename or a
+bump fails there rather than quietly weakening every other assertion.
+
+Nine mutations were run against the version check and all nine failed the
+suite: version never checked, unannotated ignored, patch pinned, reason not
+flipped with the status, `observedGeneration` dropped, an unreadable cluster
+assumed fine, only the watched kinds inspected, `Accepted` withdrawn on skew,
+and the condition not published at all.
 
 **The gateway half still has thin unit tests for the code that provisions.**
 `gateway/` has `crds_test.go`, `gateway_class_test.go`, `reporter_test.go` and
@@ -284,5 +340,7 @@ CI.
 - Pinned versions that move together: `k8s.io/* v0.36.1` (`apiextensions-apiserver
   v0.36.0`), `controller-runtime v0.24.1`, `gateway-api v1.6.1`, `libtunnel
   v0.0.37`, `go 1.26.0` (Dockerfile stage `golang:1.26-alpine`; bump both).
-  Bumping gateway-api means `go generate ./gateway/...` and a new
-  `bundledVersion`.
+  Bumping gateway-api means `go generate ./gateway/...`, and — on a new minor —
+  the version literals in `gateway/gateway_test.go` and the `SupportedVersion`
+  assert in `tests/e2e/gateway/00-assert.yaml`. `bundledVersion` follows the
+  module on its own now. `TestSupportedVersionsPin` fails with the list.
