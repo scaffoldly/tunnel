@@ -2,8 +2,21 @@ apiVersion: v1
 entries:
   tunnel:
   - apiVersion: v2
+    appVersion: 0.2.0
+    created: "2026-07-27T18:26:41.726776499Z"
+    description: Public reachability for a Kubernetes cluster via a tunnel provider.
+    digest: e3d824ee93c14d66a2514ccdb906bbb4912fff3d6abe557c6521874e9f22322a
+    home: https://tunnel.pizza
+    name: tunnel
+    sources:
+    - https://github.com/scaffoldly/tunnel
+    type: application
+    urls:
+    - https://scaffoldly.github.io/tunnel/tunnel-0.2.0.tgz
+    version: 0.2.0
+  - apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-07-27T10:00:16.452121945Z"
+    created: "2026-07-27T18:26:41.726349765Z"
     description: Public reachability for a Kubernetes cluster via a tunnel provider.
     digest: 83d430514d988c589a9687836c97daf8a1c8e58ebf3804319308c79839079f07
     home: https://tunnel.pizza
@@ -14,4 +27,4 @@ entries:
     urls:
     - https://scaffoldly.github.io/tunnel/tunnel-0.1.0.tgz
     version: 0.1.0
-generated: "2026-07-27T10:00:16.43068868Z"
+generated: "2026-07-27T18:26:41.715442789Z"
