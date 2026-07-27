@@ -12,6 +12,9 @@ kindContext: tunnel-e2e
 # Keeps kind logs out of the repo root. The kubeconfig kuttl writes is not
 # configurable and still lands in the working directory, so both are ignored.
 artifactsDir: .kuttl
+# Default is 30s per step. Minting a tunnel and waiting for the edge to answer
+# takes longer than that on a cold run.
+timeout: 180
 
 commands:
   # Build the working tree, not whatever :latest resolves to. A suite that

@@ -1,0 +1,22 @@
+# Fetches the minted hostname from the public internet — the assertion the
+# YAML ones cannot make: that traffic reaches the backend Service through the
+# tunnel, not merely that the status looks right.
+#
+# One script per scheme, so a failure names which one broke. Both are expected
+# to serve: the edge answers plaintext on 80 rather than redirecting,
+# deliberately, to match what a Cloudflare quick tunnel does. Turning "Always
+# Use HTTPS" on for the zone would make the http fetch a 301 with no body and
+# fail here, which is the point. It also matches the ports the controller
+# publishes to status.
+apiVersion: kuttl.dev/v1beta1
+kind: TestStep
+commands:
+  - script: |
+      host=$(kubectl get ingress nginx -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+      test -n "$host" || { echo "no hostname published on ingress/nginx" >&2; exit 1; }
+      curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "http://$host/" | grep -q 'Welcome to nginx'
+
+  - script: |
+      host=$(kubectl get ingress nginx -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+      test -n "$host" || { echo "no hostname published on ingress/nginx" >&2; exit 1; }
+      curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "https://$host/" | grep -q 'Welcome to nginx'

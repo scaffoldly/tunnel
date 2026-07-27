@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+status:
+  readyReplicas: 1
+---
+# The hostname is minted per run and cannot be asserted, but the ports can:
+# publish() writes them only alongside a non-empty hostname, so asserting
+# 80 and 443 proves a tunnel actually came up rather than that the Ingress
+# merely exists.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx
+status:
+  loadBalancer:
+    ingress:
+      - ports:
+          - port: 80
+            protocol: TCP
+          - port: 443
+            protocol: TCP

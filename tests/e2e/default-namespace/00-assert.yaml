@@ -1,6 +1,0 @@
-# Proves the harness works: a cluster came up and kuttl can read it. Nothing
-# about the controller yet.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: default
