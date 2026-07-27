@@ -25,7 +25,9 @@ import (
 	"reflect"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -206,21 +208,33 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 func (r *Reconciler) publish(ctx context.Context, ing *networkingv1.Ingress, hostname string) (bool, error) {
 	var want []networkingv1.IngressLoadBalancerIngress
 	if hostname != "" {
-		want = []networkingv1.IngressLoadBalancerIngress{{Hostname: hostname}}
+		want = []networkingv1.IngressLoadBalancerIngress{{
+			Hostname: hostname,
+			// No IP: a tunnel has no address to route to.
+			//
+			// Both ports, because the edge answers on both. Cloudflare quick
+			// tunnels serve plaintext on 80 and we match them deliberately, so
+			// a hostname behaves the same whichever provider minted it. A zone
+			// that redirects 80 to 443 still answers on 80 to issue it.
+			Ports: []networkingv1.IngressPortStatus{
+				{
+					Port:     80,
+					Protocol: corev1.ProtocolTCP,
+				},
+				{
+					Port:     443,
+					Protocol: corev1.ProtocolTCP,
+				},
+			},
+		}}
 	}
 
-	have := ing.Status.LoadBalancer.Ingress
-	if len(have) == len(want) {
-		same := true
-		for i := range want {
-			if have[i].Hostname != want[i].Hostname || have[i].IP != want[i].IP {
-				same = false
-				break
-			}
-		}
-		if same {
-			return false, nil
-		}
+	// DeepEqual rather than comparing the fields we happen to care about: a
+	// hand-written check silently stops noticing whatever the struct grows
+	// next, and skipping the write leaves a stale status behind with no error
+	// to say so.
+	if apiequality.Semantic.DeepEqual(ing.Status.LoadBalancer.Ingress, want) {
+		return false, nil
 	}
 
 	ing.Status.LoadBalancer.Ingress = want
