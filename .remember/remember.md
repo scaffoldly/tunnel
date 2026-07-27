@@ -623,7 +623,7 @@ worktree; nothing else should touch it by hand.
 `push:` trigger — confirmed by observation on `v0.1.0`, not assumed. Worth
 re-confirming if that filter is ever edited.
 
-## `charts/tunnel` is a published interface — the manifest is gone
+## The manifest is gone, and the chart path is internal again
 
 **There is no committed `install.yaml` any more**, no `make yaml`, and no CI
 step verifying the two agree. Production has rendered rather than redirected
@@ -631,15 +631,18 @@ since `tunnel.pizza@812623e`: the site fetches this repository's GitHub archive
 and renders `charts/tunnel` at request time, so `kubectl apply -f
 https://tunnel.pizza` *is* this chart.
 
-**That makes the path a public contract.** Renaming the repository, the default
-branch, or `charts/tunnel` breaks every new install, and **nothing fails in
-either repository's CI**, because neither fetches the archive. The warning is at
-the top of `charts/tunnel/Chart.yaml`, where someone reorganising the repo will
-hit it, and in the README.
+**That lapsed with `v0.1.0`.** The renderer now reads `index.yaml` from Pages,
+picks the newest **stable** release, verifies the tarball's sha256 against the
+index and renders that — confirmed live, with the served manifest pinning
+`ghcr.io/scaffoldly/tunnel:0.1.0` and carrying an `x-tunnel-chart` header. So
+the path is internal again: moving it breaks a release build in this
+repository's CI rather than breaking installs silently in another's. The loud
+warning is gone; one sentence survives at the top of `Chart.yaml` so nobody
+reintroduces an archive fetch thinking it was always fine.
 
-It lapses once the renderer consumes a published chart from the registry or the
-Helm repo instead of the archive — but the interim is exactly where this breaks,
-so it stays until that lands.
+**Tagging is now the release gesture.** Because the renderer picks the newest
+stable release, an annotated tag changes what every new install gets within
+about ten minutes. Prereleases are skipped, so `v0.2.0-rc1` reaches nobody.
 
 To see what a user gets:
 

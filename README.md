@@ -113,16 +113,12 @@ go build ./...
 go run . --kubeconfig ~/.kube/config
 ```
 
-### `charts/tunnel` is published, not internal
+### What gets served
 
-`https://tunnel.pizza` fetches this repository's GitHub archive and renders
-`charts/tunnel` at request time — `kubectl apply -f https://tunnel.pizza` is
-that render. Renaming the repository, the default branch or that directory
-breaks every new install, and nothing in either repository's CI notices,
-because neither fetches the archive.
-
-There is no committed manifest to keep in step any more. To see what a user
-gets:
+`https://tunnel.pizza` reads `index.yaml` from the Helm repository, picks the
+newest stable release and renders that tarball — so what a user applies is a
+versioned chart, and tagging is what ships it. There is no committed manifest.
+To see what a user gets:
 
 ```bash
 helm template tunnel charts/tunnel --namespace tunnel-system --set namespace.create=true
