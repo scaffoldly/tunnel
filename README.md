@@ -89,6 +89,23 @@ implementation in the cluster reads. A cluster already running Istio or Cilium
 should turn that one off and keep the others. The controller never deletes or
 downgrades them, and it lacks the RBAC to do so.
 
+## Install a pinned version
+
+The unversioned install tracks `main`. To pin one:
+
+```bash
+helm repo add tunnel https://scaffoldly.github.io/tunnel
+helm install tunnel tunnel/tunnel --version 0.1.0 \
+  --namespace tunnel-system --create-namespace
+```
+
+The same chart is published to `oci://ghcr.io/scaffoldly/charts/tunnel`. Both
+exist because listing versions on a registry needs authentication and the Helm
+repository's `index.yaml` does not.
+
+A chart version pins its image version: `image.tag` defaults to the chart's
+`appVersion`, so `--version 0.1.0` installs `ghcr.io/scaffoldly/tunnel:0.1.0`.
+
 ## Development
 
 ```bash

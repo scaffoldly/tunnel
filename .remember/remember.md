@@ -568,6 +568,61 @@ both halves complete: classes created with ownerReferences, CRDs installed,
 status written on both kinds, events emitted. No `kubectl auth can-i` sweep
 needed.
 
+## Releases: an annotated `v*` tag publishes three things
+
+`v0.1.0` is the first, and the pipeline was proven by running a real tag rather
+than by reading the YAML.
+
+| artifact | where |
+|---|---|
+| image | `ghcr.io/scaffoldly/tunnel:0.1.0`, `:0.1`, `:sha-<full>` |
+| chart (OCI) | `oci://ghcr.io/scaffoldly/charts/tunnel` |
+| chart (Helm repo) | `https://scaffoldly.github.io/tunnel` — `index.yaml` on Pages |
+
+**Both chart destinations, and the reason is not redundancy.** The OCI registry
+is what `helm install oci://…` wants, but it cannot answer *"what versions
+exist?"* without authentication, because listing tags on a registry is an
+authenticated API. A static `index.yaml` on Pages can, to anyone. That is the
+only thing that makes "pick the newest" work from an unauthenticated caller —
+which is exactly what tunnel.pizza's renderer is. Dropping either one breaks a
+real path.
+
+**`image.tag` defaults to the chart's `appVersion`.** `values.yaml` leaves it
+empty and the Deployment renders `.Values.image.tag | default .Chart.AppVersion`,
+so a released chart version can only install the image built from the same tag.
+The chart on `main` keeps `appVersion: "latest"`, which is what
+https://tunnel.pizza renders and what an unversioned install has always got, and
+the e2e's `--set image.tag=e2e` still wins over both.
+
+**`helm repo index --merge` is load-bearing.** Without it each release leaves
+exactly one version installable and silently unpublishes every earlier one.
+
+**Verified logged out**, with `HELM_REGISTRY_CONFIG`, `HELM_REPOSITORY_CONFIG`
+and `DOCKER_CONFIG` pointed at empty scratch directories, because everything
+works while authenticated as the publisher and that is why this class of bug
+ships:
+
+- `GET https://scaffoldly.github.io/tunnel/index.yaml` → `200`
+- `helm repo add` + `helm search repo tunnel --versions` → lists `0.1.0`
+- `helm template tunnel/tunnel --version 0.1.0` → `ghcr.io/scaffoldly/tunnel:0.1.0`
+- `helm template oci://ghcr.io/scaffoldly/charts/tunnel --version 0.1.0` → same
+- `helm install oci://…` into a fresh kind cluster → pod `Running` on
+  `:0.1.0`, both IngressClasses created, both GatewayClasses `Accepted=True`
+
+**The new `charts/tunnel` package came out public on its own** — GitHub Packages
+usually creates them private, and the controller image being public does not
+carry over, so this was expected to need a one-time visibility change from
+Christian and did not. Worth re-checking on the *next* new package rather than
+assuming it is settled.
+
+**`gh-pages` is an orphan branch** holding `index.yaml`, `index.html` and the
+chart tarballs. Pages serves it from `/`. The release job pushes to it with a
+worktree; nothing else should touch it by hand.
+
+**A tag push does reach the workflow** despite `paths-ignore` on the same
+`push:` trigger — confirmed by observation on `v0.1.0`, not assumed. Worth
+re-confirming if that filter is ever edited.
+
 ## `charts/tunnel` is a published interface — the manifest is gone
 
 **There is no committed `install.yaml` any more**, no `make yaml`, and no CI
