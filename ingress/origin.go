@@ -2,7 +2,6 @@ package ingress
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 
@@ -15,11 +14,11 @@ import (
 )
 
 // errUnsupported marks an Ingress this controller cannot serve as written, as
-// opposed to one it cannot serve yet. The distinction is what Reconcile does
-// next: a transient failure is returned so the workqueue retries it, while an
-// unsupported spec is reported once and dropped — retrying cannot fix it, and
-// editing the Ingress triggers a fresh reconcile anyway.
-var errUnsupported = errors.New("unsupported")
+// opposed to one it cannot serve yet. A local alias so the call sites below
+// read unqualified; the sentinel itself is shared across the controller, so
+// errors.Is holds for a caller that does not know which half produced the
+// error. See consts.ErrUnsupported.
+var errUnsupported = consts.ErrUnsupported
 
 // backend is one Service reference drawn out of an Ingress spec.
 type backend struct {

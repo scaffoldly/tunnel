@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 
@@ -15,9 +14,10 @@ import (
 )
 
 // errUnsupported marks a Gateway this controller cannot serve as written, as
-// opposed to one it cannot serve yet. Reconcile reports it once and drops it:
-// retrying cannot fix a spec, and editing one triggers a fresh reconcile.
-var errUnsupported = errors.New("unsupported")
+// opposed to one it cannot serve yet. A local alias so the call sites below
+// read unqualified; the sentinel itself is shared across the controller. See
+// consts.ErrUnsupported.
+var errUnsupported = consts.ErrUnsupported
 
 // backend is one Service reference drawn out of the routes attached to a
 // Gateway.

@@ -10,10 +10,24 @@
 package consts
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"time"
 )
+
+// ErrUnsupported marks an object this controller cannot serve as written, as
+// opposed to one it cannot serve yet. The distinction is what a reconcile does
+// next: a transient failure is returned so the workqueue retries it, while an
+// unsupported spec is reported once and dropped — retrying cannot fix it, and
+// editing the object triggers a fresh reconcile anyway.
+//
+// One sentinel for the whole controller rather than one per package. The
+// classification is the same question everywhere it is asked, and a caller that
+// composes two halves — a Service resolving to a child Ingress, say — would
+// otherwise have to know which package's sentinel to test for. Packages that
+// wrap it keep a local alias so the call sites read unqualified.
+var ErrUnsupported = errors.New("unsupported")
 
 // Reporter turns a controller's Go import path into the name it may report
 // events under.
