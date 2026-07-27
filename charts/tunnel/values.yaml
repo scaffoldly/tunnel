@@ -1,6 +1,11 @@
 image:
   repository: ghcr.io/scaffoldly/tunnel
-  tag: latest
+  # Empty means this chart's own appVersion, so a released chart version pins
+  # the image version it was built against and `helm install tunnel/tunnel
+  # --version 1.2.3` cannot drift onto a different controller. The chart on the
+  # default branch carries appVersion "latest", which is what
+  # https://tunnel.pizza renders and what an unversioned install has always got.
+  tag: ""
   # Empty renders no imagePullPolicy at all, which is what you want: Kubernetes
   # infers Always for :latest and IfNotPresent for a pinned tag. Set it to
   # override -- the e2e suite uses Never so a missing locally built image fails

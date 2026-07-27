@@ -112,3 +112,72 @@ jobs:
           annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Releases, on an annotated tag only. The image tags for a release come from
+  # the publish job above (type=semver); this job publishes the chart that pins
+  # them, to two places on purpose.
+  #
+  # WHY BOTH AN OCI REGISTRY AND A PAGES HELM REPO
+  #
+  # oci://ghcr.io/scaffoldly/charts is the modern way to ship a chart and is
+  # what `helm install oci://...` wants. It cannot answer "what versions
+  # exist?" without authentication — listing tags on a registry is an
+  # authenticated API — so anything that has to *discover* the newest version
+  # unauthenticated cannot use it.
+  #
+  # https://scaffoldly.github.io/tunnel is a plain static index.yaml, readable
+  # by anyone, listing every version ever published. That is the only thing
+  # that makes "pick the newest" work from an unauthenticated caller, which is
+  # exactly what tunnel.pizza's renderer is. Neither one alone covers both
+  # cases, so both are published from the same tarball.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      # gh-pages carries the Helm repo index and is pushed to below.
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # v1.2.3 -> 1.2.3. Helm rejects a leading v in a chart version.
+      - name: Version from the tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      # --app-version is the load-bearing half: values.yaml leaves image.tag
+      # empty, so the Deployment renders the chart's appVersion and a chart
+      # version can only ever install the image built from the same tag.
+      - name: Package the chart
+        run: |
+          helm package charts/tunnel \
+            --version "${{ steps.version.outputs.version }}" \
+            --app-version "${{ steps.version.outputs.version }}" \
+            --destination dist
+
+      - name: Push the chart to the OCI registry
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+          helm push "dist/tunnel-${{ steps.version.outputs.version }}.tgz" \
+            "oci://ghcr.io/${{ github.repository_owner }}/charts"
+
+      # --merge keeps every previously published version in the index. Without
+      # it each release would leave exactly one version installable and silently
+      # unpublish the rest.
+      - name: Publish the chart to the Helm repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin gh-pages
+          git worktree add pages origin/gh-pages
+          cp dist/*.tgz pages/
+          helm repo index pages \
+            --url "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}" \
+            --merge pages/index.yaml
+          cd pages
+          git add .
+          git commit -m "Publish tunnel ${{ steps.version.outputs.version }}"
+          git push origin HEAD:gh-pages
