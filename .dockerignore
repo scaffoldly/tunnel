@@ -1,0 +1,12 @@
+# Allow-list, not a deny-list. The build needs Go sources and nothing else, and
+# anything new in the repo is junk to it by default — a kubeconfig written by a
+# test run has already landed here once, and COPY . . would have put cluster
+# credentials in a build layer.
+#
+# Safe in the direction a deny-list is not: if the build ever does need a file,
+# it fails at compile time rather than silently shipping without it.
+*
+
+!**/*.go
+!go.mod
+!go.sum

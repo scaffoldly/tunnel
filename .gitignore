@@ -1,1 +1,8 @@
 bin/
+
+# kuttl run artifacts. artifactsDir in kuttl-test.yaml puts the kind logs under
+# .kuttl; the kubeconfig lands in the working directory and is not configurable,
+# and it carries credentials for the throwaway cluster.
+.kuttl/
+kind-logs-*/
+kubeconfig

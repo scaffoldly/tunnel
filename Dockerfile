@@ -1,3 +1,9 @@
+# check=skip=CopyIgnoredFile
+# Must be the first line: a comment above it demotes it to an ordinary comment.
+# .dockerignore is an allow-list, so `COPY . .` below names a path the ignore
+# file excludes and re-includes by negation. That is the intent, and buildx's
+# lint cannot tell the difference.
+
 # Build in the module cache, so a source-only change does not re-download the
 # k8s dependency tree.
 FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build

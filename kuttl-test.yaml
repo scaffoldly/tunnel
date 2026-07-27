@@ -1,0 +1,43 @@
+# kuttl runs against a throwaway kind cluster: `make test-e2e`.
+#
+# Cluster name is pinned so a failed run leaves a findable cluster rather than
+# racing whatever `kind` happens to mean, and so --skip-cluster-delete gives
+# something to attach to while debugging.
+apiVersion: kuttl.dev/v1beta1
+kind: TestSuite
+testDirs:
+  - ./tests/e2e/
+startKIND: true
+kindContext: tunnel-e2e
+# Keeps kind logs out of the repo root. The kubeconfig kuttl writes is not
+# configurable and still lands in the working directory, so both are ignored.
+artifactsDir: .kuttl
+
+commands:
+  # Build the working tree, not whatever :latest resolves to. A suite that
+  # installs the published image passes while testing code nobody wrote today,
+  # and a caching registry mirror can make that failure completely silent.
+  - command: docker build --tag ghcr.io/scaffoldly/tunnel:e2e .
+
+  # Into the node's own image store. The cluster name must match kindContext
+  # above — kuttl names the cluster after it — or this loads into the wrong
+  # cluster and the pull below fails somewhere confusing.
+  - command: kind load docker-image ghcr.io/scaffoldly/tunnel:e2e --name tunnel-e2e
+
+  # The chart in this tree, not a published one: these tests exist to catch a
+  # chart that stopped installing, and a remote chart could not.
+  #
+  # A fixed :e2e tag, never :latest. Kubernetes infers imagePullPolicy from
+  # the tag, and :latest infers Always, which discards the image just loaded
+  # in favour of pulling the published one. pullPolicy=Never on top so a
+  # missing local image fails fast with ErrImageNeverPull instead of pulling
+  # something that only looks right.
+  #
+  # --create-namespace rather than the chart's namespace.create, which stays
+  # off precisely so helm owns namespace creation on this path.
+  #
+  # --wait is itself an assertion. It blocks until the Deployment reports
+  # ready, which means the image loaded, the ServiceAccount and its RBAC
+  # bound, and /readyz answered — so a broken install fails the suite up
+  # front, with helm's error rather than a confusing assert timeout later.
+  - command: helm upgrade --install tunnel ./charts/tunnel --namespace tunnel-system --create-namespace --set image.tag=e2e --set image.pullPolicy=Never --wait --timeout 5m
