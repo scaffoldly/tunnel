@@ -73,6 +73,7 @@ const (
 	ControllerGateway      = "gateway"
 	ControllerGatewayClass = "gatewayclass"
 	ControllerService      = "service"
+	ControllerPod          = "pod"
 )
 
 // LabelManagedBy marks the objects this controller creates on a user's behalf.
@@ -101,6 +102,10 @@ const (
 // a Service that already declares spec.ports[].appProtocol: https needs no
 // annotation at all.
 const ProtocolAnnotation = "protocol"
+
+// TunnelAnnotation is the name half of {provider}/tunnel, the annotation that
+// asks for a tunnel and says which API to serve it through.
+const TunnelAnnotation = "tunnel"
 
 // Flag names and their defaults.
 const (
@@ -213,6 +218,15 @@ const (
 	// old behaviour, and this says how to correct it if that is wrong.
 	MsgProtocolUnknownFmt = "could not determine whether %s speaks TLS (%v); assuming %s. " +
 		"Set %s/%s: \"https\" if it does"
+
+	// MsgPortAssumedFmt takes the port and the Service it was written onto.
+	// Emitted when a Pod declared no container port, or declared several that
+	// could not be told apart by name — `kubectl run --port` produces an
+	// unnamed one, so that is not a rare shape. The tunnel comes up either way;
+	// this is how someone whose app listens on 3000 finds out why it serves
+	// errors.
+	MsgPortAssumedFmt = "no container port to choose from; assuming %d. " +
+		"Edit Service %s if that is wrong"
 
 	// MsgChildConflictFmt takes the child's kind and name. Emitted when the
 	// name a Service's child would take is already held by an object this

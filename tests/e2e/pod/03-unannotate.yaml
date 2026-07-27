@@ -1,0 +1,7 @@
+# Removing the trigger collects the whole chain. Owner-reference GC covers the
+# Pod being deleted and covers nothing about the annotation going while the Pod
+# stays — the case a user hits the moment they undo the line they added.
+apiVersion: kuttl.dev/v1beta1
+kind: TestStep
+commands:
+  - script: kubectl annotate pod nginx -n "$NAMESPACE" tunnel.pizza/tunnel-

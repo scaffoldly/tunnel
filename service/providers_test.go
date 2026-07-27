@@ -84,6 +84,23 @@ func TestProviders(t *testing.T) {
 			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme}},
 		},
 		{
+			name: "true is the value a person guesses, and it means the Ingress branch",
+			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "true"}, httpPort),
+			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme}},
+		},
+		{
+			// Learned as a pair or not at all: someone who finds out "true"
+			// works will write "false" to turn it off, and refusing exactly
+			// that is a trap.
+			name: "false is an explicit off, like none",
+			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "false"}, httpPort),
+		},
+		{
+			name: "True is true",
+			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "True"}, httpPort),
+			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme}},
+		},
+		{
 			name: "the value is case-insensitive",
 			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "Ingress"}, httpPort),
 			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme}},
@@ -101,12 +118,12 @@ func TestProviders(t *testing.T) {
 		{
 			name:    "yes is the value someone will write, and it is an error",
 			svc:     svc(map[string]string{"tunnel.pizza/tunnel": "yes"}, httpPort),
-			wantErr: `annotation tunnel.pizza/tunnel="yes": must be "ingress", "gateway" or "none"`,
+			wantErr: `annotation tunnel.pizza/tunnel="yes": must be "true", "ingress", "gateway" or "none"`,
 		},
 		{
 			name:    "an empty value is an error, not an off",
 			svc:     svc(map[string]string{"tunnel.pizza/tunnel": ""}, httpPort),
-			wantErr: `annotation tunnel.pizza/tunnel="": must be "ingress", "gateway" or "none"`,
+			wantErr: `annotation tunnel.pizza/tunnel="": must be "true", "ingress", "gateway" or "none"`,
 		},
 		{
 			name:    "an unknown provider is a typo, and is reported",
@@ -363,7 +380,7 @@ func TestProvidersReportsTheSameErrorEveryTime(t *testing.T) {
 		"api.trycloudflare.com/tunnel": "yes",
 	}, httpPort)
 
-	const want = `annotation api.trycloudflare.com/tunnel="yes": must be "ingress", "gateway" or "none"`
+	const want = `annotation api.trycloudflare.com/tunnel="yes": must be "true", "ingress", "gateway" or "none"`
 	for i := range 100 {
 		_, err := providers(s, known)
 		if err == nil {

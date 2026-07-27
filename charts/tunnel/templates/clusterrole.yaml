@@ -29,14 +29,44 @@ capability brings its rules in the same commit as the code that calls them.
                                  metadata-only, but RBAC does not distinguish:
                                  the metadata endpoint is the same resource.
 
+  services (+create/update/       The write verbs are the Pod half: an annotated
+    delete)                      Pod cannot be an Ingress backend, so it gets a
+                                 Service generated in front of it, carrying the
+                                 Pod's tunnel annotations, and everything after
+                                 that is the Service half doing what it already
+                                 does.
+
+                                 THIS COST A GUARANTEE, AND THE TRADE IS WORTH
+                                 STATING. Before the Pod half, services was
+                                 read-only here, and that was the decision-2
+                                 boundary expressed where it could not erode: an
+                                 annotated Service could not be written to even
+                                 by a bug. It can now. What replaces it is the
+                                 same scoping every other generated kind has —
+                                 metav1.IsControlledBy before any update or
+                                 delete — so the property is "never writes a
+                                 Service it did not create" rather than "never
+                                 writes a Service". Weaker, enforced in code
+                                 rather than by the API server, and mutation-
+                                 tested for exactly that reason.
+
+  pods (get/list/watch)          The Pod half watches every Pod's *metadata* and
+                                 filters on the annotation before reading any of
+                                 them in full. Pods are the most numerous object
+                                 in a cluster; a structured informer over them
+                                 would dwarf the rest of this controller.
+
+  endpointslices                 The generated Service has no selector, so it
+    (get/list/watch              needs a slice naming the one Pod IP. A selector
+     +create/update/delete)      built from the Pod's labels would be simpler and
+                                 is what `kubectl run --expose` does — and it
+                                 would front every Pod sharing those labels,
+                                 which for a Pod carrying a Deployment's labels
+                                 is the whole Deployment. Precision is worth the
+                                 extra object.
+
   services/status (patch)        Only the spec.loadBalancerClass path, and only
                                  to write a hostname the tunnel actually serves.
-                                 Note what is absent: no write verb on services
-                                 itself, so this controller cannot touch a
-                                 Service's spec or metadata even by mistake.
-                                 An annotated Service is left exactly as its
-                                 author wrote it, and that boundary lives here
-                                 rather than only in the code that respects it.
 
                                  patch, not update: publish() sends a merge
                                  patch computed against the object it read.
@@ -166,7 +196,13 @@ rules:
     verbs: ["get"]
   - apiGroups: [""]
     resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
   - apiGroups: [""]
     resources: ["services/status"]
     verbs: ["patch"]

@@ -1,0 +1,14 @@
+# The two commands from the front page, exactly as a person types them. No
+# fixture YAML, because the claim being tested is that nothing else is needed:
+#
+#   kubectl run nginx --image=nginx
+#   kubectl annotate pod nginx tunnel.pizza/tunnel=true
+#
+# `kubectl run` declares no containerPort — the field is only populated with
+# --port — so this also exercises the assumed-80 path, which is the guess that
+# makes the first line work at all.
+apiVersion: kuttl.dev/v1beta1
+kind: TestStep
+commands:
+  - script: kubectl run nginx --image=nginx -n "$NAMESPACE"
+  - script: kubectl annotate pod nginx -n "$NAMESPACE" tunnel.pizza/tunnel=true

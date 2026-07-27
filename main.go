@@ -30,6 +30,7 @@ import (
 	"github.com/scaffoldly/tunnel/healthz"
 	"github.com/scaffoldly/tunnel/ingress"
 	"github.com/scaffoldly/tunnel/metrics"
+	"github.com/scaffoldly/tunnel/pod"
 	"github.com/scaffoldly/tunnel/readyz"
 	"github.com/scaffoldly/tunnel/service"
 )
@@ -90,6 +91,7 @@ func main() {
 		{ingress.Name, func(m ctrl.Manager) error { return ingress.New(m, cfg) }},
 		{gateway.Name, func(m ctrl.Manager) error { return gateway.New(m, cfg) }},
 		{service.Name, func(m ctrl.Manager) error { return service.New(m, cfg) }},
+		{pod.Name, func(m ctrl.Manager) error { return pod.New(m, cfg) }},
 	} {
 		if err := c.register(mgr); err != nil {
 			log.Error(err, "registration failed", "component", c.name)

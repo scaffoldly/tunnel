@@ -1,0 +1,25 @@
+# The whole point: a Pod nobody wrote a Service for is reachable from the
+# public internet. One script per scheme so a failure names which broke.
+apiVersion: kuttl.dev/v1beta1
+kind: TestStep
+commands:
+  - script: |
+      host=$(kubectl get ingress nginx-tunnel-tunnel-pizza -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+      test -n "$host" || { echo "no hostname published" >&2; exit 1; }
+      curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "http://$host/" | grep -q 'Welcome to nginx'
+
+  - script: |
+      host=$(kubectl get ingress nginx-tunnel-tunnel-pizza -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+      test -n "$host" || { echo "no hostname published" >&2; exit 1; }
+      curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "https://$host/" | grep -q 'Welcome to nginx'
+
+  # The Pod is the user's object and is left exactly as they wrote it: the one
+  # annotation they added, and no status or metadata written back.
+  - script: |
+      count=$(kubectl get pod nginx -n "$NAMESPACE" -o go-template='{{ len .metadata.annotations }}')
+      test "$count" = "1" || {
+        echo "annotations on the pod = $count, want only the 1 this suite set" >&2
+        kubectl get pod nginx -n "$NAMESPACE" -o jsonpath='{.metadata.annotations}' >&2
+        exit 1
+      }
+      kubectl get pod nginx -n "$NAMESPACE" -o jsonpath='{.metadata.annotations.tunnel\.pizza/tunnel}' | grep -qx true

@@ -47,6 +47,18 @@ const (
 	// that field, because the API server makes it immutable once set. This is
 	// the only way to stop one without deleting the Service.
 	tunnelNone = "none"
+
+	// tunnelTrue and tunnelFalse are the boolean spelling, and "true" is the
+	// value a person guesses first — it is what the front page asks for. It
+	// means the Ingress branch, which is the default anyway: one object rather
+	// than two, readable by every Kubernetes user.
+	//
+	// "false" is accepted as a synonym for none rather than left out of the
+	// vocabulary. A user who learns that "true" works will write "false" to
+	// turn it off, and refusing exactly that is a trap — the pair is learned
+	// together or not at all.
+	tunnelTrue  = "true"
+	tunnelFalse = "false"
 )
 
 // Port names a tunnel will pick out of a multi-port Service, in order of
@@ -175,8 +187,34 @@ func providers(svc *corev1.Service, known []string) ([]resolved, error) {
 	return out, nil
 }
 
-// requested reads both triggers into one map, keyed by provider.
-func requested(svc *corev1.Service, known []string) (map[string]*request, error) {
+// Requested reports which providers an object's annotations ask for a tunnel
+// from, in a stable order.
+//
+// Exported for the Pod half, which shares this vocabulary exactly but has no
+// spec.loadBalancerClass, no ports to select from and no child of its own — it
+// copies the annotations onto a Service it generates and lets everything
+// downstream happen there. Sharing the parser rather than the whole resolution
+// is what keeps one definition of what these values mean.
+func Requested(annotations map[string]string, known []string) ([]string, error) {
+	requests, err := fromAnnotations(annotations, known)
+	if err != nil {
+		return nil, err
+	}
+	var wanted []string
+	for provider, r := range requests {
+		if r.on && !r.off {
+			wanted = append(wanted, provider)
+		}
+	}
+	slices.Sort(wanted)
+	return wanted, nil
+}
+
+// fromAnnotations parses the {provider}/tunnel and {provider}/protocol keys.
+//
+// Shared verbatim between Services and Pods: the vocabulary is the same object
+// to object, and a second parser would be a second thing to keep in step.
+func fromAnnotations(annotations map[string]string, known []string) (map[string]*request, error) {
 	requests := map[string]*request{}
 	get := func(provider string) *request {
 		r, ok := requests[provider]
@@ -187,9 +225,10 @@ func requested(svc *corev1.Service, known []string) (map[string]*request, error)
 		return r
 	}
 
-	// Sorted, so a Service with two bad annotations reports the same one every
+	// Sorted, so an object with two bad annotations reports the same one every
 	// time rather than whichever the map yielded first.
-	for _, key := range slices.Sorted(maps.Keys(svc.Annotations)) {
+	for _, key := range slices.Sorted(maps.Keys(annotations)) {
+		value := annotations[key]
 		provider, name, ok := strings.Cut(key, "/")
 		if !ok {
 			// No prefix: the whole key is the name half.
@@ -207,7 +246,6 @@ func requested(svc *corev1.Service, known []string) (map[string]*request, error)
 				consts.ErrUnsupported, key, provider, strings.Join(known, ", "))
 		}
 
-		value := svc.Annotations[key]
 		switch name {
 		case annotationTunnel:
 			// The value names the API the tunnel is served through, or turns
@@ -232,6 +270,23 @@ func requested(svc *corev1.Service, known []string) (map[string]*request, error)
 			}
 			get(provider).protocol = protocol
 		}
+	}
+	return requests, nil
+}
+
+// requested reads both triggers into one map, keyed by provider.
+func requested(svc *corev1.Service, known []string) (map[string]*request, error) {
+	requests, err := fromAnnotations(svc.Annotations, known)
+	if err != nil {
+		return nil, err
+	}
+	get := func(provider string) *request {
+		r, ok := requests[provider]
+		if !ok {
+			r = &request{api: apiIngress}
+			requests[provider] = r
+		}
+		return r
 	}
 
 	// spec.loadBalancerClass carries the provider directly. Dotted values are
@@ -320,14 +375,15 @@ func parseProtocol(value string) (string, error) {
 // through, or that there should not be one.
 func parseTunnel(value string) (childAPI, bool, error) {
 	switch lowered := strings.ToLower(value); lowered {
-	case string(apiIngress):
+	case string(apiIngress), tunnelTrue:
 		return apiIngress, true, nil
 	case string(apiGateway):
 		return apiGateway, true, nil
-	case tunnelNone:
+	case tunnelNone, tunnelFalse:
 		return "", false, nil
 	default:
-		return "", false, fmt.Errorf("must be %q, %q or %q", apiIngress, apiGateway, tunnelNone)
+		return "", false, fmt.Errorf("must be %q, %q, %q or %q",
+			tunnelTrue, apiIngress, apiGateway, tunnelNone)
 	}
 }
 

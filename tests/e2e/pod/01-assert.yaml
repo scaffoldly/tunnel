@@ -1,0 +1,81 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+status:
+  phase: Running
+---
+# Generated. The Pod cannot be an Ingress backend, so this stands in front of
+# it and carries the annotation onward — everything after this point is the
+# Service half doing what it already did.
+#
+# There is deliberately no selector. One built from this Pod's labels would be
+# `run: nginx`, which is what `kubectl run --expose` uses and what a second
+# `kubectl run nginx` would join.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-tunnel
+  labels:
+    app.kubernetes.io/managed-by: tunnel
+  annotations:
+    tunnel.pizza/tunnel: "true"
+  ownerReferences:
+    - apiVersion: v1
+      kind: Pod
+      name: nginx
+      controller: true
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP
+---
+# What makes a selector-less Service route: the one Pod IP, by hand.
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: nginx-tunnel
+  labels:
+    kubernetes.io/service-name: nginx-tunnel
+  ownerReferences:
+    - apiVersion: v1
+      kind: Pod
+      name: nginx
+      controller: true
+addressType: IPv4
+ports:
+  - name: http
+    port: 80
+    protocol: TCP
+---
+# And the Ingress the Service half wrote for the generated Service, which is
+# where the hostname lands. Three objects deep from one annotation; asserting
+# the ports proves a tunnel actually came up rather than that the chain merely
+# exists.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx-tunnel-tunnel-pizza
+  ownerReferences:
+    - apiVersion: v1
+      kind: Service
+      name: nginx-tunnel
+      controller: true
+spec:
+  ingressClassName: tunnel.pizza
+  defaultBackend:
+    service:
+      name: nginx-tunnel
+      port:
+        number: 80
+status:
+  loadBalancer:
+    ingress:
+      - ports:
+          - port: 80
+            protocol: TCP
+          - port: 443
+            protocol: TCP

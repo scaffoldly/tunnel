@@ -1,0 +1,17 @@
+# kuttl fails the step if any of these still exists. The Ingress goes with the
+# Service through ownership; the Service and slice go because this controller
+# collects them.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-tunnel
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: nginx-tunnel
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx-tunnel-tunnel-pizza
