@@ -15,7 +15,7 @@ capability brings its rules in the same commit as the code that calls them.
 
   namespaces (get)               Config.Owner reads the controller's own
                                  namespace to build the ownerReference on the
-                                 classes --install creates, so uninstalling
+                                 classes the install flags create, so uninstalling
                                  collects them. Cluster-scoped dependents can
                                  only have cluster-scoped owners, which rules
                                  out the Deployment.
@@ -28,9 +28,10 @@ capability brings its rules in the same commit as the code that calls them.
                                  it, for a handful of reads per Ingress change.
 
   ingressclasses (+create)       Resolve spec.ingressClassName back to a
-                                 controller and a provider annotation; create for
-                                 --install. An existing class naming someone else
-                                 is read and left alone, so no update.
+                                 controller, and to the provider the class is
+                                 named for; create for --install-ingress-classes.
+                                 An existing class naming someone else is read
+                                 and left alone, so no update.
 
   gateways, gatewayclasses       Same shape. Inert on clusters without the
                                  Gateway API CRDs: the controllers do not
@@ -47,7 +48,9 @@ capability brings its rules in the same commit as the code that calls them.
 
   gatewayclasses/status (update) Gateway API requires the implementing controller
                                  to publish Accepted, so the class reports
-                                 Accepted=False/Waiting until provisioning exists.
+                                 Accepted=True with the generation it observed.
+                                 A conformant consumer may refuse a class its
+                                 controller has not accepted.
 
   events.k8s.io/events           mgr.GetEventRecorder is the events.k8s.io/v1
                                  client: it creates an event and patches it as
@@ -57,7 +60,7 @@ capability brings its rules in the same commit as the code that calls them.
                                  shows these; the API server serves one store
                                  through both endpoints.
 
-  customresourcedefinitions      --install bundles the Gateway API CRDs and
+  customresourcedefinitions      --install-gateway-api bundles the CRDs and
     (get/list/watch/create/update) installs them where a cluster has none, so a
                                  Gateway-API-less cluster is usable without a
                                  second install step. get to compare, create to

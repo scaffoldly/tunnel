@@ -4,14 +4,17 @@ Kubernetes controllers giving a cluster public reachability through a tunnel
 provider — no port forwarding, no DynDNS, no router configuration, and it works
 from behind carrier-grade NAT where port forwarding is impossible.
 
-**Ingress works.** A claimed Ingress gets a tunnel to its backend Service, and
-its public hostname appears in `status.loadBalancer.ingress[].hostname` — the
-ADDRESS column of `kubectl get ingress`. The tunnels are ephemeral quick
-tunnels held in the controller process, so the hostname changes whenever the
-controller restarts.
+**Ingress.** A claimed Ingress gets a tunnel to its backend Service, and its
+public hostname appears in `status.loadBalancer.ingress[].hostname` — the
+ADDRESS column of `kubectl get ingress`.
 
-**Gateway API is still a stub.** Matching Gateways receive an `Unimplemented`
-warning event and no tunnel is created.
+**Gateway API.** A claimed Gateway gets a tunnel to the Service its HTTPRoutes
+name, published to `status.addresses` as a `Hostname`, and the GatewayClass
+reports `Accepted`. A Gateway names no backend itself, so one with no route
+attached yet has no address. The CRDs are installed if the cluster has none.
+
+The tunnels are ephemeral quick tunnels held in the controller process, so the
+hostname changes whenever the controller restarts.
 
 ## Install
 
@@ -51,24 +54,40 @@ The provider is the host tunnels are minted from — `tunnel.pizza` means
 libtunnel.Cloudflare().WithProvider(provider)
 ```
 
-It is inferred, most-specific first:
+It is never a flag, and never an annotation: **the class is the provider.** A
+class is named for the host it mints from, so picking a class is the whole
+choice, and `kubectl get ingressclass` reads as the list of control planes this
+cluster can reach. Two are created at startup:
 
-1. `tunnel.pizza/provider` annotation on the Ingress or Gateway
-2. the same annotation on its IngressClass or GatewayClass
-3. the built-in default, `tunnel.pizza`
+| Class | Mints from |
+|---|---|
+| `tunnel.pizza` | named hostnames under `tunneled.pizza` |
+| `api.trycloudflare.com` | Cloudflare quick tunnels — no account, no us |
 
-There is no flag. A cluster defaults to `tunnel.pizza` and sends individual
-workloads elsewhere by annotating them, without needing a class per provider.
+For a different control plane, create a class named for that host with
+`spec.controller` (or `spec.controllerName`) set to the import path above.
+Nothing else selects one, so there is no second spelling to disagree with the
+name.
 
-## Install flag
+## Install flags
 
-`--install` (default true) has the controller create default IngressClasses and
-GatewayClasses at startup, named `tunnel.pizza`. That keeps the shipped
-manifest to a Deployment and its RBAC, and keeps a GatewayClass out of a file
-that must apply on clusters without the Gateway API CRDs.
+Three, all defaulting to true, because their blast radii differ:
 
-Turn it off when the classes are managed by Helm, Argo, or anything else that
-would fight over ownership.
+| Flag | Creates |
+|---|---|
+| `--install-ingress-classes` | one IngressClass per provider |
+| `--install-gateway-classes` | one GatewayClass per provider |
+| `--install-gateway-api` | the Gateway API CRDs, if the cluster has none |
+
+The class flags keep the shipped manifest down to a Deployment and its RBAC,
+and keep a GatewayClass out of a file that must apply on clusters without the
+Gateway API CRDs. Turn them off when the classes are managed by Helm, Argo, or
+anything else that would fight over ownership.
+
+`--install-gateway-api` writes cluster-scoped CRDs that every Gateway API
+implementation in the cluster reads. A cluster already running Istio or Cilium
+should turn that one off and keep the others. The controller never deletes or
+downgrades them, and it lacks the RBAC to do so.
 
 ## Development
 

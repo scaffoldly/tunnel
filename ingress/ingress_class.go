@@ -58,9 +58,9 @@ func install(ctx context.Context, c client.Client, owner *metav1.OwnerReference)
 func installClass(ctx context.Context, c client.Client, provider string, owner *metav1.OwnerReference) error {
 	logger := log.FromContext(ctx).WithValues("ingressclass", provider)
 
-	// No provider annotation: the name is the provider. (*Reconciler).provider
-	// falls back to the class's own name, so annotating it here would only
-	// restate it — and then two places could disagree.
+	// Nothing but the name: (*Reconciler).class hands class.Name to libtunnel
+	// as the provider, so any second spelling of it here could only disagree
+	// with the first.
 	class := &networkingv1.IngressClass{
 		ObjectMeta: metav1.ObjectMeta{Name: provider},
 		Spec:       networkingv1.IngressClassSpec{Controller: ControllerName},

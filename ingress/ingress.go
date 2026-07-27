@@ -4,11 +4,11 @@
 // setting spec.controller to ControllerName, which is this package's import
 // path. The Gateway API half lives in package gateway alongside it.
 //
-// What it does, per claimed Ingress: resolve the provider host from the
-// annotation cascade, resolve the backend Service to a local origin URL, ask
-// libtunnel for a tunnel from that provider to that origin, and publish the
-// public hostname to status.loadBalancer.ingress[].hostname once the tunnel
-// is reachable end to end.
+// What it does, per claimed Ingress: take the provider host from the name of
+// the IngressClass it names, resolve the backend Service to a local origin
+// URL, ask libtunnel for a tunnel from that provider to that origin, and
+// publish the public hostname to status.loadBalancer.ingress[].hostname once
+// the tunnel is reachable end to end.
 //
 // The tunnel is held in this process — libtunnel runs the cloudflared engine
 // in-process — so requests arrive here and are proxied to the Service. That

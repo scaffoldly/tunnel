@@ -1,14 +1,13 @@
 // Command tunnel runs the controllers that give a cluster public reachability
 // through a tunnel provider.
 //
-// The Ingress half provisions: an Ingress claimed by one of our IngressClasses
-// gets a tunnel from its provider to its backend Service, and the public
-// hostname is published to status.loadBalancer.ingress[].hostname — what
-// `kubectl get ingress` prints under ADDRESS. Traffic reaches the origin
-// through this process, which holds the edge connection.
-//
-// The Gateway API half is still a stub: matching Gateways receive an
-// "Unimplemented" event and matching GatewayClasses report Accepted=False.
+// Both halves provision. An Ingress claimed by one of our IngressClasses gets
+// a tunnel from its provider to its backend Service, and the public hostname
+// is published to status.loadBalancer.ingress[].hostname — what `kubectl get
+// ingress` prints under ADDRESS. A Gateway claimed by one of our GatewayClasses
+// gets one to whatever its HTTPRoutes name, published to status.addresses, and
+// the class reports Accepted. Traffic reaches the origin through this process,
+// which holds the edge connection.
 package main
 
 import (

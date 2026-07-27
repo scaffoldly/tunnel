@@ -10,9 +10,13 @@ Opt a workload in (nothing is claimed implicitly — neither is a default class)
 
 A claimed Ingress gets a tunnel to its backend Service; its hostname shows up in
 the ADDRESS column of `kubectl get ingress` in that workload's own namespace.
-Gateways are still a scaffold and receive an "Unimplemented" event.
 
-Point one at a different control plane with an annotation, on the resource or on
-its class:
+A claimed Gateway gets one to the Service its HTTPRoutes name, published to
+status.addresses — so a Gateway with no route yet has no address.
 
-  tunnel.pizza/provider: my-own-host.example
+A class is named for the host it mints from, so choosing one is the whole
+configuration. For a different control plane, create a class named for that host
+and claim it with the controller's import path:
+
+  IngressClass  spec.controller:     github.com/scaffoldly/tunnel/ingress
+  GatewayClass  spec.controllerName: github.com/scaffoldly/tunnel/gateway

@@ -29,11 +29,11 @@ way. Keep it short; explanation belongs in Helm comments, which do not render.
 #   tunnel.pizza            named hostnames under tunneled.pizza
 #   api.trycloudflare.com   Cloudflare quick tunnels, no account, no us
 #
-# Opt a workload in with `ingressClassName: <one of the above>`. Neither is a
-# default class, so nothing is claimed implicitly. The public hostname then
-# appears in the ADDRESS column of `kubectl get ingress`, and is not stable
-# across controller restarts.
+# Opt a workload in with `ingressClassName` or `gatewayClassName: <one of the
+# above>`. Neither is a default class, so nothing is claimed implicitly. The
+# public hostname appears in the ADDRESS column of `kubectl get ingress`, or in
+# `status.addresses` on a Gateway, and is not stable across controller restarts.
 #
-# Gateway API is not implemented yet: matching Gateways get an Unimplemented
-# event and no tunnel.
+# A Gateway takes its backend from the HTTPRoutes that name it, so it has no
+# address until one exists. Gateway API CRDs are installed if you have none.
 {{- end }}
