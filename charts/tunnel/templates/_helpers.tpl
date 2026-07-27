@@ -15,8 +15,8 @@ app.kubernetes.io/name: {{ .Chart.Name }}
 {{- end }}
 
 {{/*
-The one thing a user reads at the point of applying install.yaml, which is
-served straight from https://tunnel.pizza and displayed inline on the hero page.
+The one thing a user reads at the point of applying, since this chart is what
+https://tunnel.pizza renders and serves, and the hero page displays it inline.
 Emitted by whichever object renders first — the Namespace when namespace.create
 is on, otherwise the ServiceAccount — so it stays at the top of the file either
 way. Keep it short; explanation belongs in Helm comments, which do not render.

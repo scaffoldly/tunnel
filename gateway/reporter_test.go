@@ -30,7 +30,8 @@ func TestReporterNameIsAcceptedByTheAPIServer(t *testing.T) {
 }
 
 // TestControllerNameIsThePackagePath guards the contract nothing else checks:
-// install.yaml's spec.controllerName is this string, and a package move would
+// every GatewayClass this controller created names this string in
+// spec.controllerName, and a package move would
 // change it silently on every cluster that already installed us.
 func TestControllerNameIsThePackagePath(t *testing.T) {
 	if want := "github.com/scaffoldly/tunnel/gateway"; string(ControllerName) != want {

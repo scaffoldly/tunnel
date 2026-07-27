@@ -62,16 +62,6 @@ jobs:
       - name: Test
         run: go test ./...
 
-      # install.yaml is what users kubectl apply; charts/tunnel renders it.
-      # Nothing enforces that they agree — see the note in install.yaml.
-      - name: Verify install.yaml matches the chart
-        run: |
-          make yaml
-          if ! git diff --exit-code install.yaml; then
-            echo "::error::install.yaml is stale; run 'make yaml' and commit the result"
-            exit 1
-          fi
-
   publish:
     # Pull requests reach `check` but stop here: a fork must not be able to push
     # to the org's registry.

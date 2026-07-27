@@ -20,11 +20,13 @@ import (
 )
 
 // TestControllerNameIsThePackagePath guards the one contract nothing else
-// checks: install.yaml's spec.controller is this string, and a package move
-// would change it silently on every cluster that already installed us.
+// checks: every IngressClass this controller has ever created carries this
+// string in spec.controller, and that field is immutable. A package move would
+// change it silently, and every cluster that already installed us would keep a
+// class naming a controller that no longer exists.
 func TestControllerNameIsThePackagePath(t *testing.T) {
 	if want := "github.com/scaffoldly/tunnel/ingress"; ControllerName != want {
-		t.Fatalf("ControllerName = %q, want %q — install.yaml's spec.controller must match", ControllerName, want)
+		t.Fatalf("ControllerName = %q, want %q — installed IngressClasses name the old value and cannot be updated", ControllerName, want)
 	}
 	if Name != "ingress" {
 		t.Errorf("Name = %q, want %q", Name, "ingress")

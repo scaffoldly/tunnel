@@ -560,12 +560,7 @@ and https.
   Both with `observedGeneration: 1`. That the second exists at all is the proof
   that a metadata-only `PartialObjectMetadataList` read works through
   `mgr.GetAPIReader()` — nothing else exercises that path.
-- `curl -sI -H 'Accept: */*' https://tunnel.pizza` → `307` →
-  `raw.githubusercontent.com/scaffoldly/tunnel/main/install.yaml`, which returns
-  `200`, `cache-control: max-age=300`. The served body is byte-identical to
-  `install.yaml` on disk, re-checked after `5250558` went out.
-- CI run `30240811031` on `5250558`: `check` and `publish` both green, including
-  "Verify install.yaml matches the chart".
+- CI run `30240811031` on `5250558`: `check` and `publish` both green.
 
 The old open question — whether the cut-down RBAC is actually sufficient — is
 **closed by observation**. The e2e installs the chart's real ClusterRole and
@@ -573,46 +568,37 @@ both halves complete: classes created with ownerReferences, CRDs installed,
 status written on both kinds, events emitted. No `kubectl auth can-i` sweep
 needed.
 
-## `install.yaml` is generated from the chart
+## `charts/tunnel` is a published interface — the manifest is gone
 
-`charts/tunnel` is the source of truth; `make yaml` renders `install.yaml` with
-`--namespace tunnel-system --set namespace.create=true`. CI fails on a stale
-manifest ("Verify install.yaml matches the chart"). Edit the chart, never the
-manifest. `--namespace` is load-bearing: without it `.Release.Namespace` is
-`default` and the manifest installs there while still applying cleanly.
+**There is no committed `install.yaml` any more**, no `make yaml`, and no CI
+step verifying the two agree. Production has rendered rather than redirected
+since `tunnel.pizza@812623e`: the site fetches this repository's GitHub archive
+and renders `charts/tunnel` at request time, so `kubectl apply -f
+https://tunnel.pizza` *is* this chart.
 
-The redirect is Accept-header conditional, in `~/scaffoldly/tunnel.pizza`
-(`src/app/page.tsx`, `WANTS_PAGE = /text\/(html|x-component)/i`). A browser gets
-the marketing page; `kubectl`/`curl` get the 307. Test with `curl`, never a
-browser. `MANIFEST` over there tracks `main`, unpinned — **any push to main that
-touches `install.yaml` reaches every new `kubectl apply` within 300s**, with no
-release gate. Pinning to a tag is a cross-repo change.
+**That makes the path a public contract.** Renaming the repository, the default
+branch, or `charts/tunnel` breaks every new install, and **nothing fails in
+either repository's CI**, because neither fetches the archive. The warning is at
+the top of `charts/tunnel/Chart.yaml`, where someone reorganising the repo will
+hit it, and in the README.
 
-CI ignores `**.md`, `.remember/**` and `LICENSE*` on both `push` and
-`pull_request`, so a docs-only or handoff-only commit produces **no run at all**
-— not a green one. Do not go looking for it.
+It lapses once the renderer consumes a published chart from the registry or the
+Helm repo instead of the archive — but the interim is exactly where this breaks,
+so it stays until that lands.
 
-## The prose sweep is done — how it was wrong, so it does not recur
+To see what a user gets:
 
-Eleven places said the Gateway half did not work, or documented the deleted
-annotation; all eleven are fixed in `502deca` and `5250558`. The pattern is
-worth keeping: **every one of them was written in the same commit as code that
-was true at the time, and none of them had a test.** Prose about a capability
-ages the moment the capability lands, and nothing in this repo checks it.
+    helm template tunnel charts/tunnel --namespace tunnel-system --set namespace.create=true
 
-The rule that replaced them all, used verbatim wherever an annotation used to
-be documented: *a class is named for the host it mints from, and choosing a
-class is the whole configuration.* Reuse that sentence rather than inventing a
-paraphrase.
+`--namespace` is still load-bearing: without it `.Release.Namespace` is
+`default` and the render installs there while still applying cleanly.
 
 `tunnel.header` in `charts/tunnel/templates/_helpers.tpl` is the one to be
-careful with — it renders into `install.yaml`, is served from
-https://tunnel.pizza and shown inline on the hero page, and reaches every new
-`kubectl apply` within 300s of a push to main. Current wording states two
-things a user needs before applying and neither of which was there before: a
-Gateway takes its backend from the HTTPRoutes that name it (so it has no
-address until one exists), and the Gateway API CRDs are installed if they have
-none.
+careful with — it renders into what https://tunnel.pizza serves and is shown
+inline on the hero page. Current wording states two things a user needs before
+applying, neither of which was there before: a Gateway takes its backend from
+the HTTPRoutes that name it (so it has no address until one exists), and the
+Gateway API CRDs are installed if they have none.
 
 ## GatewayClass conditions are complete — the policy, and where it came from
 

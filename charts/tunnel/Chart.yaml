@@ -1,3 +1,15 @@
+# charts/tunnel IS A PUBLISHED INTERFACE, NOT AN INTERNAL DIRECTORY.
+#
+# https://tunnel.pizza fetches this repository's GitHub archive and renders this
+# exact path at request time, so `kubectl apply -f https://tunnel.pizza` is this
+# chart. Renaming the repository, the default branch, or this directory breaks
+# every new install — and nothing fails in either repository's CI when it
+# happens, because neither one fetches the archive.
+#
+# This lapses once the renderer consumes a published chart from the OCI registry
+# or the Helm repo instead of the archive. Until then it is exactly the kind of
+# coupling that gets tidied away by someone with no way to know.
+
 apiVersion: v2
 name: tunnel
 description: Public reachability for a Kubernetes cluster via a tunnel provider.

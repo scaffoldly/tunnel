@@ -82,7 +82,7 @@ func selfNamespace(ctx context.Context, cl client.Client) (string, error) {
 // treated as having an unresolvable reference — never garbage collected, and
 // flagged with an OwnerRefInvalidNamespace event. That rules out the
 // Deployment, which is the intuitive choice. The Namespace is the nearest
-// cluster-scoped thing install.yaml creates and uninstalling removes.
+// cluster-scoped thing the chart creates and uninstalling removes.
 //
 // Returns nil when there is nothing to own the classes: authenticating as
 // anything other than a ServiceAccount means no namespace, which is the case
