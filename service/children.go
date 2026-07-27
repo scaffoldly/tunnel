@@ -59,7 +59,8 @@ func (r *Reconciler) ensure(ctx context.Context, svc *corev1.Service, want resol
 	}
 
 	if apiequality.Semantic.DeepEqual(existing.Spec, desired.Spec) &&
-		existing.Labels[consts.LabelManagedBy] == desired.Labels[consts.LabelManagedBy] {
+		existing.Labels[consts.LabelManagedBy] == desired.Labels[consts.LabelManagedBy] &&
+		matches(existing.Annotations, desired.Annotations) {
 		return &existing, nil
 	}
 
@@ -72,6 +73,14 @@ func (r *Reconciler) ensure(ctx context.Context, svc *corev1.Service, want resol
 		updated.Labels = map[string]string{}
 	}
 	updated.Labels[consts.LabelManagedBy] = consts.ManagedBy
+	// Merged, not replaced: an annotation somebody else put on the child is
+	// not ours to drop.
+	if updated.Annotations == nil {
+		updated.Annotations = map[string]string{}
+	}
+	for k, v := range desired.Annotations {
+		updated.Annotations[k] = v
+	}
 	if err := r.Update(ctx, updated); err != nil {
 		return nil, fmt.Errorf("update ingress %s: %w", client.ObjectKeyFromObject(updated), err)
 	}
@@ -125,6 +134,14 @@ func child(svc *corev1.Service, want resolved) *networkingv1.Ingress {
 			Name:      childName(svc.Name, want.provider),
 			Namespace: svc.Namespace,
 			Labels:    map[string]string{consts.LabelManagedBy: consts.ManagedBy},
+			// The child restates how its origin is dialed, rather than the
+			// Ingress half reaching back to the Service for it. That keeps the
+			// generated object self-describing — the whole argument for
+			// generating a real object instead of hiding the tunnel — and it
+			// means a hand-written Ingress can say the same thing the same way.
+			Annotations: map[string]string{
+				want.provider + "/" + consts.ProtocolAnnotation: want.protocol,
+			},
 			// Namespaced owner, namespaced dependent, same namespace: legal,
 			// unlike the cluster-scoped classes the installer creates, which
 			// have to be owned by a Namespace.
@@ -168,4 +185,17 @@ func childName(service, provider string) string {
 	sum := sha256.Sum256([]byte(service + "/" + provider))
 	suffix := "-" + hex.EncodeToString(sum[:])[:hashLength]
 	return name[:maxNameLength-len(suffix)] + suffix
+}
+
+// matches reports whether want is a subset of got. The child may carry
+// annotations this controller did not write — kubectl's last-applied, a mesh's
+// injection marker — and rewriting it on every pass because of them would churn
+// the object and re-mint its tunnel.
+func matches(got, want map[string]string) bool {
+	for k, v := range want {
+		if got[k] != v {
+			return false
+		}
+	}
+	return true
 }

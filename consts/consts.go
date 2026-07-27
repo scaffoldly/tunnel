@@ -84,6 +84,24 @@ const (
 	ManagedBy      = "tunnel"
 )
 
+// ProtocolAnnotation is the name half of {provider}/protocol, which declares
+// how the origin behind an object is dialed. Read on a Service by the Service
+// controller and on an Ingress by the Ingress half, so the generated child
+// carries the same statement its Service made and `kubectl get ingress -o yaml`
+// shows what the annotation stood for.
+//
+// This is not the provider annotation that was deleted in 1b90a58 and is not
+// coming back. That one named which provider to mint from, duplicating what the
+// class name already says. This one names something no field on an Ingress can
+// express: whether the backend speaks TLS. Every ingress controller carries its
+// own spelling of it — nginx's is nginx.ingress.kubernetes.io/backend-protocol
+// — precisely because the API has no portable place for it.
+//
+// Values are the appProtocol vocabulary rather than a private enumeration, so
+// a Service that already declares spec.ports[].appProtocol: https needs no
+// annotation at all.
+const ProtocolAnnotation = "protocol"
+
 // Flag names and their defaults.
 const (
 	FlagMetricsAddr = "metrics-bind-address"
@@ -118,6 +136,9 @@ const (
 	// `kubectl describe svc` point at the right object instead of leaving a
 	// scavenger hunt.
 	ReasonProvisioning = "Provisioning"
+	// ReasonProtocol reports what the controller concluded about how an origin
+	// is dialed, and how to override it.
+	ReasonProtocol = "Protocol"
 
 	ActionProvision = "Provision"
 )
@@ -182,6 +203,17 @@ const (
 	// provider. Emitted on the Service, because that is the object the user
 	// touched and the only one they know to look at.
 	MsgProvisioningFmt = "%s %s reconciled for provider %s; that object carries the tunnel's own status and events"
+	// MsgProtocolProbedFmt takes the detected scheme and the address probed.
+	// Normal, not a warning: it worked, and saying so is what makes the
+	// detection auditable rather than magic.
+	MsgProtocolProbedFmt = "origin at %s speaks %s; set %s/%s to override"
+	// MsgProtocolUnknownFmt takes the address, the reason, and the annotation
+	// to set. Emitted when the origin could not be reached at all, so nothing
+	// can be concluded about it — the tunnel is built plaintext, which is the
+	// old behaviour, and this says how to correct it if that is wrong.
+	MsgProtocolUnknownFmt = "could not determine whether %s speaks TLS (%v); assuming %s. " +
+		"Set %s/%s: \"https\" if it does"
+
 	// MsgChildConflictFmt takes the child's kind and name. Emitted when the
 	// name a Service's child would take is already held by an object this
 	// controller does not own — the collision the ownerReference cannot
@@ -192,11 +224,18 @@ const (
 // Origin is how an Ingress backend is turned into the local URL a tunnel
 // fronts.
 const (
-	// OriginScheme is how the controller dials the backend Service. Always
-	// plaintext: an Ingress carries no portable way to declare a TLS origin
-	// (every controller spells it as its own annotation), so guessing would be
-	// worse than being predictable.
+	// OriginScheme is how the controller dials the backend Service unless the
+	// backend says otherwise. Plaintext by default: most origins are, and a
+	// wrong guess in either direction fails every request rather than
+	// degrading. What overrides it is never a guess — see ProtocolAnnotation
+	// and appProtocol.
 	OriginScheme = "http"
+	// OriginSchemeTLS dials the backend over TLS. Certificate verification is
+	// off at the tunnel engine, which is what makes an in-cluster origin
+	// reachable at all: a Service's certificate is signed by the cluster CA,
+	// or is self-signed, and neither is a public chain. The tunnel is the
+	// trust boundary here, not this hop.
+	OriginSchemeTLS = "https"
 	// OriginDomain is appended to <service>.<namespace> to reach a Service
 	// from the controller Pod. Deliberately not ".svc.cluster.local": a
 	// cluster may be built with a different cluster domain, and every Pod's

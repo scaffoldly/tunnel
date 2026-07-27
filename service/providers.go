@@ -32,8 +32,21 @@ import (
 // Kubernetes allows an optional DNS-subdomain prefix, a slash, and a name of up
 // to 63 characters.
 const (
-	annotationTunnel    = "tunnel"
-	annotationTunnelAPI = "tunnel-api"
+	annotationTunnel   = "tunnel"
+	annotationProtocol = consts.ProtocolAnnotation
+)
+
+// What {provider}/tunnel may say. One annotation carrying one enumeration
+// rather than a boolean plus a second annotation to pick the API: "give me a
+// tunnel" and "through which API" were never independent questions, and
+// splitting them made the off switch ambiguous — tunnel: "false" beside
+// tunnel-api: "gateway" is a sentence with two verbs.
+const (
+	// tunnelNone is the explicit off. It matters more than it looks: a tunnel
+	// reached through spec.loadBalancerClass cannot be turned off by editing
+	// that field, because the API server makes it immutable once set. This is
+	// the only way to stop one without deleting the Service.
+	tunnelNone = "none"
 )
 
 // Port names a tunnel will pick out of a multi-port Service, in order of
@@ -45,20 +58,30 @@ var preferredPortNames = []string{"http", "https"}
 type childAPI string
 
 const (
-	// apiIngress is the default: one object rather than two, readable by every
-	// Kubernetes user, and enough for what a one-line annotation offers. The
-	// Gateway path's extra expressiveness — parentRefs, filters, several routes
-	// — is exactly what is not on offer here, so a user who wants it asks.
+	// apiIngress is what spec.loadBalancerClass gets when nothing says
+	// otherwise: one object rather than two, readable by every Kubernetes
+	// user, and enough for what a one-line annotation offers. The Gateway
+	// path's extra expressiveness — parentRefs, filters, several routes — is
+	// exactly what is not on offer here, so a user who wants it asks for it by
+	// name.
 	apiIngress childAPI = "ingress"
 	apiGateway childAPI = "gateway"
 )
 
 // resolved is one tunnel a Service is asking for: which provider mints it,
-// which API the child object is written through, and which port it fronts.
+// which API the child object is written through, which port it fronts, and how
+// that port is dialed.
 type resolved struct {
 	provider string
 	api      childAPI
 	port     servicePort
+	// protocol is the scheme the origin is dialed with — consts.OriginScheme
+	// or consts.OriginSchemeTLS. Never empty.
+	protocol string
+	// declared records whether protocol came from the Service or is just the
+	// default. Only an undeclared one is worth probing for, and only an
+	// undeclared one may be overridden by what the probe finds.
+	declared bool
 }
 
 // servicePort is the one port of a Service a tunnel fronts. Both spellings are
@@ -67,6 +90,10 @@ type resolved struct {
 type servicePort struct {
 	name   string
 	number int32
+	// appProtocol is spec.ports[].appProtocol as the Service declared it, or
+	// empty. Carried rather than interpreted here so the interpretation lives
+	// in one place.
+	appProtocol string
 }
 
 // request is what the triggers on one Service said about one provider, before
@@ -76,10 +103,11 @@ type request struct {
 	// value parses as false. off wins — see providers.
 	on  bool
 	off bool
-	// api defaults to apiIngress. set records whether {provider}/tunnel-api was
-	// present, which is only needed to catch one naming no tunnel at all.
-	api    childAPI
-	apiSet bool
+	// api is which Kubernetes API the child is written through.
+	api childAPI
+	// protocol is empty unless {provider}/protocol said so, which is what lets
+	// the Service's own appProtocol supply the default.
+	protocol string
 }
 
 // providers resolves a Service to the tunnels it asks for, deduplicated on
@@ -135,10 +163,13 @@ func providers(svc *corev1.Service, known []string) ([]resolved, error) {
 
 	out := make([]resolved, 0, len(wanted))
 	for _, provider := range wanted {
+		scheme, declared := protocol(requests[provider].protocol, port.appProtocol)
 		out = append(out, resolved{
 			provider: provider,
 			api:      requests[provider].api,
 			port:     port,
+			protocol: scheme,
+			declared: declared,
 		})
 	}
 	return out, nil
@@ -164,7 +195,7 @@ func requested(svc *corev1.Service, known []string) (map[string]*request, error)
 			// No prefix: the whole key is the name half.
 			provider, name = "", provider
 		}
-		if name != annotationTunnel && name != annotationTunnelAPI {
+		if name != annotationTunnel && name != annotationProtocol {
 			continue
 		}
 		if provider == "" {
@@ -179,29 +210,27 @@ func requested(svc *corev1.Service, known []string) (map[string]*request, error)
 		value := svc.Annotations[key]
 		switch name {
 		case annotationTunnel:
-			// ParseBool, so true/True/1 all work and false/0 is an explicit
-			// off — useful for disabling without deleting the line. Anything
-			// else is an error rather than a silent default: "yes" is the value
-			// someone will write, and treating it as off would be
-			// indistinguishable from the controller being broken.
-			on, err := strconv.ParseBool(value)
-			if err != nil {
-				return nil, fmt.Errorf("%w: annotation %s=%q is not a boolean; use \"true\" or \"false\"",
-					consts.ErrUnsupported, key, value)
-			}
-			r := get(provider)
-			if on {
-				r.on = true
-			} else {
-				r.off = true
-			}
-		case annotationTunnelAPI:
-			api, err := parseAPI(value)
+			// The value names the API the tunnel is served through, or turns
+			// it off. Anything else is an error rather than a silent default:
+			// "yes" and "true" are both values someone will write, and reading
+			// either as off would be indistinguishable from the controller
+			// being broken.
+			api, on, err := parseTunnel(value)
 			if err != nil {
 				return nil, fmt.Errorf("%w: annotation %s=%q: %v", consts.ErrUnsupported, key, value, err)
 			}
 			r := get(provider)
-			r.api, r.apiSet = api, true
+			if on {
+				r.on, r.api = true, api
+			} else {
+				r.off = true
+			}
+		case annotationProtocol:
+			protocol, err := parseProtocol(value)
+			if err != nil {
+				return nil, fmt.Errorf("%w: annotation %s=%q: %v", consts.ErrUnsupported, key, value, err)
+			}
+			get(provider).protocol = protocol
 		}
 	}
 
@@ -231,29 +260,74 @@ func requested(svc *corev1.Service, known []string) (map[string]*request, error)
 		}
 	}
 
-	// A tunnel-api naming a provider that no trigger asked for is config that
+	// A protocol naming a provider that no trigger asked for is config that
 	// will never be read. Almost always a half-finished edit, so it is worth a
 	// word. A provider explicitly turned off still counts as named — keeping
-	// the api line while flipping tunnel to "false" is exactly what the
+	// the protocol line while switching tunnel to "none" is exactly what the
 	// explicit off is for.
 	for _, provider := range slices.Sorted(maps.Keys(requests)) {
-		if r := requests[provider]; r.apiSet && !r.on && !r.off {
-			return nil, fmt.Errorf("%w: annotation %s/%s names no tunnel; add %s/%s: \"true\"",
-				consts.ErrUnsupported, provider, annotationTunnelAPI, provider, annotationTunnel)
+		r := requests[provider]
+		if r.on || r.off {
+			continue
+		}
+		if r.protocol != "" {
+			return nil, fmt.Errorf("%w: annotation %s/%s names no tunnel; add %s/%s: %q",
+				consts.ErrUnsupported, provider, annotationProtocol, provider, annotationTunnel, apiIngress)
 		}
 	}
 
 	return requests, nil
 }
 
-func parseAPI(value string) (childAPI, error) {
-	switch childAPI(strings.ToLower(value)) {
-	case apiIngress:
-		return apiIngress, nil
-	case apiGateway:
-		return apiGateway, nil
+// protocol decides how the origin is dialed, most explicit first: what the
+// annotation said, then what the Service declared through appProtocol, then
+// plaintext.
+//
+// An appProtocol this controller does not recognise is ignored rather than
+// refused. It is a core field with an open vocabulary — "mysql", "kafka",
+// "kubernetes.io/h2c" are all legitimate — and it belongs to the Service's
+// author, who may have set it for a consumer that has nothing to do with us.
+// The annotation is ours, so an unrecognised value there is an error.
+// The second return says whether the answer was declared or merely defaulted.
+func protocol(annotated, appProtocol string) (string, bool) {
+	if annotated != "" {
+		return annotated, true
+	}
+	if scheme, err := parseProtocol(appProtocol); err == nil {
+		return scheme, true
+	}
+	return consts.OriginScheme, false
+}
+
+// parseProtocol maps a declared application protocol to the scheme the origin
+// is dialed with.
+func parseProtocol(value string) (string, error) {
+	switch strings.ToLower(value) {
+	case consts.OriginScheme:
+		return consts.OriginScheme, nil
+	case consts.OriginSchemeTLS:
+		return consts.OriginSchemeTLS, nil
 	default:
-		return "", fmt.Errorf("must be %q or %q", apiIngress, apiGateway)
+		// grpc is the one people will reach for next. It is not simply a
+		// scheme — it is HTTP/2, cleartext or TLS — so it needs the engine's
+		// http2 knob rather than this one, and claiming support by mapping it
+		// onto https would produce a tunnel that connects and fails every RPC.
+		return "", fmt.Errorf("must be %q or %q", consts.OriginScheme, consts.OriginSchemeTLS)
+	}
+}
+
+// parseTunnel reads what {provider}/tunnel says: which API to serve the tunnel
+// through, or that there should not be one.
+func parseTunnel(value string) (childAPI, bool, error) {
+	switch lowered := strings.ToLower(value); lowered {
+	case string(apiIngress):
+		return apiIngress, true, nil
+	case string(apiGateway):
+		return apiGateway, true, nil
+	case tunnelNone:
+		return "", false, nil
+	default:
+		return "", false, fmt.Errorf("must be %q, %q or %q", apiIngress, apiGateway, tunnelNone)
 	}
 }
 
@@ -289,13 +363,13 @@ func frontedPort(svc *corev1.Service) (servicePort, error) {
 		}
 		return servicePort{}, fmt.Errorf("%w: service exposes no ports", consts.ErrUnsupported)
 	case 1:
-		return servicePort{name: candidates[0].Name, number: candidates[0].Port}, nil
+		return newServicePort(candidates[0]), nil
 	}
 
 	for _, want := range preferredPortNames {
 		for _, p := range candidates {
 			if p.Name == want {
-				return servicePort{name: p.Name, number: p.Port}, nil
+				return newServicePort(p), nil
 			}
 		}
 	}
@@ -306,6 +380,14 @@ func frontedPort(svc *corev1.Service) (servicePort, error) {
 	}
 	return servicePort{}, fmt.Errorf("%w: %d TCP ports (%s), none named %s; a tunnel fronts a single origin",
 		consts.ErrUnsupported, len(candidates), strings.Join(found, ", "), strings.Join(quoted(preferredPortNames), " or "))
+}
+
+func newServicePort(p corev1.ServicePort) servicePort {
+	out := servicePort{name: p.Name, number: p.Port}
+	if p.AppProtocol != nil {
+		out.appProtocol = *p.AppProtocol
+	}
+	return out
 }
 
 func describePort(p corev1.ServicePort) string {

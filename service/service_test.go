@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -24,6 +25,15 @@ var testKey = types.NamespacedName{Namespace: "default", Name: "web"}
 
 func reconciler(t *testing.T, objs ...client.Object) (*Reconciler, client.Client, *events.FakeRecorder) {
 	t.Helper()
+	return reconcilerWithProbe(t, func(context.Context, string) (string, error) {
+		return consts.OriginScheme, nil
+	}, objs...)
+}
+
+// reconcilerWithProbe is the same, with the origin probe answering whatever the
+// test wants. No unit test opens a socket.
+func reconcilerWithProbe(t *testing.T, probe Prober, objs ...client.Object) (*Reconciler, client.Client, *events.FakeRecorder) {
+	t.Helper()
 	s := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(s))
 	c := fake.NewClientBuilder().
@@ -34,7 +44,7 @@ func reconciler(t *testing.T, objs ...client.Object) (*Reconciler, client.Client
 		WithStatusSubresource(&corev1.Service{}, &networkingv1.Ingress{}).
 		Build()
 	recorder := events.NewFakeRecorder(32)
-	return &Reconciler{Client: c, Services: c, Recorder: recorder, Providers: known}, c, recorder
+	return &Reconciler{Client: c, Services: c, Recorder: recorder, Probe: probe, Providers: known}, c, recorder
 }
 
 // annotated is a ClusterIP Service asking for a tunnel the ordinary way.
@@ -133,7 +143,7 @@ func assertNoEvent(t *testing.T, recorder *events.FakeRecorder, substr string) {
 // TestReconcileCreatesTheChild is the base case: one annotation, one child
 // Ingress, named for the provider and pointed at the selected port.
 func TestReconcileCreatesTheChild(t *testing.T) {
-	r, c, recorder := reconciler(t, annotated(map[string]string{"tunnel.pizza/tunnel": "true"}))
+	r, c, recorder := reconciler(t, annotated(map[string]string{"tunnel.pizza/tunnel": "ingress"}))
 
 	if _, err := r.Reconcile(context.Background(), reconcileRequest()); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
@@ -166,7 +176,7 @@ func TestReconcileCreatesTheChild(t *testing.T) {
 // regresses silently: nothing else in this package fails if a status write or
 // an annotation sneaks onto the annotation path.
 func TestReconcileLeavesAnAnnotatedServiceUntouched(t *testing.T) {
-	r, c, _ := reconciler(t, annotated(map[string]string{"tunnel.pizza/tunnel": "true"}))
+	r, c, _ := reconciler(t, annotated(map[string]string{"tunnel.pizza/tunnel": "ingress"}))
 
 	if _, err := r.Reconcile(context.Background(), reconcileRequest()); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
@@ -261,7 +271,7 @@ func TestReconcileClearsStatusWhenTheTunnelGoesAway(t *testing.T) {
 // most likely to be missed: owner-reference GC covers Service deletion and
 // nothing covers this.
 func TestReconcileDeletesTheChildWhenTheTriggerGoes(t *testing.T) {
-	r, c, _ := reconciler(t, annotated(map[string]string{"tunnel.pizza/tunnel": "true"}))
+	r, c, _ := reconciler(t, annotated(map[string]string{"tunnel.pizza/tunnel": "ingress"}))
 
 	if _, err := r.Reconcile(context.Background(), reconcileRequest()); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
@@ -298,7 +308,7 @@ func TestReconcileDeletesTheChildWhenTurnedOff(t *testing.T) {
 	}
 
 	svc := getService(t, c)
-	svc.Annotations = map[string]string{"tunnel.pizza/tunnel": "false"}
+	svc.Annotations = map[string]string{"tunnel.pizza/tunnel": "none"}
 	if err := c.Update(context.Background(), svc); err != nil {
 		t.Fatalf("annotate off: %v", err)
 	}
@@ -318,8 +328,8 @@ func TestReconcileDeletesTheChildWhenTurnedOff(t *testing.T) {
 // child names carry the provider at all.
 func TestReconcileTwoProvidersTwoChildren(t *testing.T) {
 	r, c, _ := reconciler(t, annotated(map[string]string{
-		"tunnel.pizza/tunnel":          "true",
-		"api.trycloudflare.com/tunnel": "true",
+		"tunnel.pizza/tunnel":          "ingress",
+		"api.trycloudflare.com/tunnel": "ingress",
 	}))
 
 	if _, err := r.Reconcile(context.Background(), reconcileRequest()); err != nil {
@@ -342,7 +352,7 @@ func TestReconcileTwoProvidersTwoChildren(t *testing.T) {
 // provider named twice is one child, not two.
 func TestReconcileDedupesBothTriggers(t *testing.T) {
 	svc := classed("tunnel.pizza")
-	svc.Annotations = map[string]string{"tunnel.pizza/tunnel": "true"}
+	svc.Annotations = map[string]string{"tunnel.pizza/tunnel": "ingress"}
 	r, c, _ := reconciler(t, svc)
 
 	if _, err := r.Reconcile(context.Background(), reconcileRequest()); err != nil {
@@ -358,7 +368,7 @@ func TestReconcileDedupesBothTriggers(t *testing.T) {
 // making sense loses its tunnel and says so, rather than serving a hostname
 // nothing on the Service asks for.
 func TestReconcileRefusesAnUnresolvableService(t *testing.T) {
-	r, c, recorder := reconciler(t, annotated(map[string]string{"tunnel.pizza/tunnel": "true"}))
+	r, c, recorder := reconciler(t, annotated(map[string]string{"tunnel.pizza/tunnel": "ingress"}))
 
 	if _, err := r.Reconcile(context.Background(), reconcileRequest()); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
@@ -409,7 +419,7 @@ func TestReconcileWillNotAdoptSomebodyElsesIngress(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "web-tunnel-pizza"},
 		Spec:       networkingv1.IngressSpec{},
 	}
-	r, c, recorder := reconciler(t, annotated(map[string]string{"tunnel.pizza/tunnel": "true"}), theirs)
+	r, c, recorder := reconciler(t, annotated(map[string]string{"tunnel.pizza/tunnel": "ingress"}), theirs)
 
 	if _, err := r.Reconcile(context.Background(), reconcileRequest()); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
@@ -446,8 +456,7 @@ func TestPruneSparesSomebodyElsesIngress(t *testing.T) {
 // serving Ingress semantics to someone who asked for Gateway ones is a lie.
 func TestReconcileRefusesTheGatewayBranch(t *testing.T) {
 	r, c, recorder := reconciler(t, annotated(map[string]string{
-		"tunnel.pizza/tunnel":     "true",
-		"tunnel.pizza/tunnel-api": "gateway",
+		"tunnel.pizza/tunnel": "gateway",
 	}))
 
 	if _, err := r.Reconcile(context.Background(), reconcileRequest()); err != nil {
@@ -463,7 +472,7 @@ func TestReconcileRefusesTheGatewayBranch(t *testing.T) {
 // TestReconcileEmitsTunnelReady: on the annotation path an event is the only
 // signal there is, so `kubectl describe svc` has to carry the hostname.
 func TestReconcileEmitsTunnelReady(t *testing.T) {
-	r, c, recorder := reconciler(t, annotated(map[string]string{"tunnel.pizza/tunnel": "true"}))
+	r, c, recorder := reconciler(t, annotated(map[string]string{"tunnel.pizza/tunnel": "ingress"}))
 
 	if _, err := r.Reconcile(context.Background(), reconcileRequest()); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
@@ -480,7 +489,7 @@ func TestReconcileEmitsTunnelReady(t *testing.T) {
 // update-on-every-reconcile would churn the child and, through the Ingress
 // half, re-mint its tunnel.
 func TestReconcileIsIdempotent(t *testing.T) {
-	r, c, _ := reconciler(t, annotated(map[string]string{"tunnel.pizza/tunnel": "true"}))
+	r, c, _ := reconciler(t, annotated(map[string]string{"tunnel.pizza/tunnel": "ingress"}))
 
 	if _, err := r.Reconcile(context.Background(), reconcileRequest()); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
@@ -501,7 +510,7 @@ func TestReconcileIsIdempotent(t *testing.T) {
 // TestReconcileFollowsThePort: the child must point at the port selection
 // chose, not at the first one it found.
 func TestReconcileFollowsThePort(t *testing.T) {
-	r, c, _ := reconciler(t, annotated(map[string]string{"tunnel.pizza/tunnel": "true"},
+	r, c, _ := reconciler(t, annotated(map[string]string{"tunnel.pizza/tunnel": "ingress"},
 		corev1.ServicePort{Name: "grpc", Port: 9090, Protocol: corev1.ProtocolTCP},
 		corev1.ServicePort{Name: "http", Port: 80, Protocol: corev1.ProtocolTCP},
 	))
@@ -559,7 +568,7 @@ func TestStatusProvider(t *testing.T) {
 		t.Errorf("statusProvider(loadBalancer with our class) = %q, %v; want %q, true", got, ok, class)
 	}
 
-	annotatedOnly := annotated(map[string]string{"tunnel.pizza/tunnel": "true"})
+	annotatedOnly := annotated(map[string]string{"tunnel.pizza/tunnel": "ingress"})
 	if got, ok := statusProvider(annotatedOnly, known); ok {
 		t.Errorf("statusProvider(annotated ClusterIP) = %q, true; want false — the API server forbids the write", got)
 	}
@@ -573,5 +582,145 @@ func TestStatusProvider(t *testing.T) {
 	noClass.Spec.Type = corev1.ServiceTypeLoadBalancer
 	if _, ok := statusProvider(noClass, known); ok {
 		t.Error("statusProvider(LoadBalancer with no class) = true, want false")
+	}
+}
+
+// TestReconcileProbesAnUndeclaredOrigin: a Service that says nothing about how
+// it speaks gets dialed, and what comes back reaches the child. Without this
+// the whole probe is inert.
+func TestReconcileProbesAnUndeclaredOrigin(t *testing.T) {
+	var probed string
+	r, c, recorder := reconcilerWithProbe(t, func(_ context.Context, address string) (string, error) {
+		probed = address
+		return consts.OriginSchemeTLS, nil
+	}, annotated(map[string]string{"tunnel.pizza/tunnel": "ingress"}))
+
+	if _, err := r.Reconcile(context.Background(), reconcileRequest()); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	if want := "web.default.svc:8080"; probed != want {
+		t.Errorf("probed %q, want the origin the tunnel will front, %q", probed, want)
+	}
+	if got := getIngress(t, c, "web-tunnel-pizza").Annotations["tunnel.pizza/protocol"]; got != consts.OriginSchemeTLS {
+		t.Errorf("child protocol = %q, want %q from the probe", got, consts.OriginSchemeTLS)
+	}
+	assertEvent(t, recorder, consts.ReasonProtocol)
+}
+
+// TestReconcileDoesNotProbeWhatTheServiceDeclared: an explicit statement is not
+// a hypothesis. Probing past it would let a backend that is briefly wrong —
+// mid-rollout, say — override its own author.
+func TestReconcileDoesNotProbeWhatTheServiceDeclared(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		svc  *corev1.Service
+		want string
+	}{
+		{
+			name: "annotation",
+			svc: annotated(map[string]string{
+				"tunnel.pizza/tunnel":   "ingress",
+				"tunnel.pizza/protocol": "https",
+			}),
+			want: consts.OriginSchemeTLS,
+		},
+		{
+			name: "appProtocol",
+			svc: annotated(map[string]string{"tunnel.pizza/tunnel": "ingress"},
+				appProto(tcp("http", 8080), "https")),
+			want: consts.OriginSchemeTLS,
+		},
+		{
+			name: "annotation naming plaintext, against a TLS-looking backend",
+			svc: annotated(map[string]string{
+				"tunnel.pizza/tunnel":   "ingress",
+				"tunnel.pizza/protocol": "http",
+			}),
+			want: consts.OriginScheme,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			probed := false
+			r, c, _ := reconcilerWithProbe(t, func(context.Context, string) (string, error) {
+				probed = true
+				return consts.OriginSchemeTLS, nil
+			}, tc.svc)
+
+			if _, err := r.Reconcile(context.Background(), reconcileRequest()); err != nil {
+				t.Fatalf("Reconcile() error = %v", err)
+			}
+			if probed {
+				t.Error("probed an origin the Service already declared")
+			}
+			if got := getIngress(t, c, "web-tunnel-pizza").Annotations["tunnel.pizza/protocol"]; got != tc.want {
+				t.Errorf("child protocol = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestReconcileWarnsWhenTheOriginCannotBeReached: an unreachable origin proves
+// nothing about how it speaks, so it must not be read as plaintext silently.
+// The tunnel is still built — that is the old behaviour — and the event says
+// how to correct it.
+func TestReconcileWarnsWhenTheOriginCannotBeReached(t *testing.T) {
+	r, c, recorder := reconcilerWithProbe(t, func(context.Context, string) (string, error) {
+		return "", errors.New("connection refused")
+	}, annotated(map[string]string{"tunnel.pizza/tunnel": "ingress"}))
+
+	result, err := r.Reconcile(context.Background(), reconcileRequest())
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	if got := getIngress(t, c, "web-tunnel-pizza").Annotations["tunnel.pizza/protocol"]; got != consts.OriginScheme {
+		t.Errorf("child protocol = %q, want the plaintext default", got)
+	}
+	// Nothing else brings us back: a backend becoming ready is not an event on
+	// the Service or on its child.
+	if result.RequeueAfter == 0 {
+		t.Error("no requeue after an undetermined probe; the origin would stay misread forever")
+	}
+	assertEvent(t, recorder, consts.ReasonProtocol)
+}
+
+// TestReconcileDoesNotRequeueWhenEverythingIsKnown guards the other side: a
+// requeue on every reconcile would poll every Service in the cluster forever.
+func TestReconcileDoesNotRequeueWhenEverythingIsKnown(t *testing.T) {
+	r, _, _ := reconciler(t, annotated(map[string]string{"tunnel.pizza/tunnel": "ingress"}))
+
+	result, err := r.Reconcile(context.Background(), reconcileRequest())
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if result.RequeueAfter != 0 {
+		t.Errorf("RequeueAfter = %v, want none", result.RequeueAfter)
+	}
+}
+
+// TestReconcileUpdatesAChildWhoseProtocolChanged is the requeue path arriving:
+// the first probe could not reach the origin and the child was built plaintext,
+// then the backend came up and the probe found TLS. If that never reaches the
+// existing child, the retry is decoration and the tunnel 400s forever.
+func TestReconcileUpdatesAChildWhoseProtocolChanged(t *testing.T) {
+	svc := annotated(map[string]string{"tunnel.pizza/tunnel": "ingress"})
+
+	// The child as the first, failed probe left it.
+	stale := child(svc, resolved{
+		provider: "tunnel.pizza", api: apiIngress,
+		port: servicePort{name: "http", number: 8080}, protocol: consts.OriginScheme,
+	})
+
+	r, c, _ := reconcilerWithProbe(t, func(context.Context, string) (string, error) {
+		return consts.OriginSchemeTLS, nil
+	}, svc, stale)
+
+	if _, err := r.Reconcile(context.Background(), reconcileRequest()); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	if got := getIngress(t, c, "web-tunnel-pizza").Annotations["tunnel.pizza/protocol"]; got != consts.OriginSchemeTLS {
+		t.Errorf("child protocol = %q, want %q — the corrected probe never reached it", got, consts.OriginSchemeTLS)
 	}
 }

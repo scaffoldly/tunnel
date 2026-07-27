@@ -4,8 +4,20 @@
 # a public hostname — and a fixture Service would not test it, because a
 # fixture is written for us.
 #
-# It also exercises the single-port path: one port named https, so port
-# selection has exactly one candidate and takes it.
+# ONE annotation, and nothing else. That is the whole point of the suite.
+#
+# Its value names the API the tunnel is served through — "ingress" here — which
+# is also the whole of the on switch. "none" turns it off.
+#
+# The API server speaks TLS on 443, so the origin has to be dialed with TLS or
+# every request collects a 400 from its TLS listener. Nothing here says so: the
+# Service's port is *named* https but declares no appProtocol, and a name is not
+# a declaration. The controller finds out by dialing the origin and offering a
+# TLS handshake, then records what it found on the child. If that detection
+# breaks, the healthz fetch in 02-test.yaml turns into a 400 and says so.
+#
+# It also exercises the single-port path: one port, so port selection has
+# exactly one candidate and takes it.
 #
 # WHAT THIS COSTS, AND WHY THE LAST STEP MATTERS
 #
@@ -15,9 +27,9 @@
 # once rather than leaving it up until the API server's garbage collector gets
 # to it.
 #
-# This is its own suite rather than a step of tests/e2e/service so it can be
-# run, skipped and reasoned about on its own — it is the only test in the tree
-# that touches an object it did not create:
+# Its own suite rather than a step of tests/e2e/service, so it can be run and
+# reasoned about on its own — it is the only test in the tree that touches an
+# object it did not create:
 #
 #   kubectl kuttl test --test service-annotate
 #
@@ -36,4 +48,4 @@
 apiVersion: kuttl.dev/v1beta1
 kind: TestStep
 commands:
-  - command: kubectl annotate service kubernetes --namespace default tunnel.pizza/tunnel=true --overwrite
+  - command: kubectl annotate service kubernetes --namespace default tunnel.pizza/tunnel=ingress --overwrite

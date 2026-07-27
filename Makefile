@@ -39,3 +39,4 @@ crds:
 # kuttl-test.yaml so `kubectl kuttl test` on its own behaves the same.
 test-e2e:
 	kubectl kuttl test
+

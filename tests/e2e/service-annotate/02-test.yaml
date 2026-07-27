@@ -7,8 +7,10 @@
 # {provider}/hostname annotation was a real proposal, and it is dead only
 # because it was decided against, not because anything prevents it.
 #
-# Exactly one annotation, the one 01-annotate.yaml added: the kubernetes
-# Service ships with none of its own.
+# Exactly the one annotation 01-annotate.yaml added, and no second: the
+# kubernetes Service ships with none of its own, so anything else here was
+# written by the controller. In particular the detected protocol goes on the
+# child, never back onto the Service.
 apiVersion: kuttl.dev/v1beta1
 kind: TestStep
 commands:
@@ -16,24 +18,26 @@ commands:
       status=$(kubectl get service kubernetes -n default -o jsonpath='{.status.loadBalancer.ingress}')
       test -z "$status" || { echo "status.loadBalancer.ingress on the annotated service = '$status', want empty" >&2; exit 1; }
       count=$(kubectl get service kubernetes -n default -o go-template='{{ len .metadata.annotations }}')
-      test "$count" = "1" || { echo "annotations on the annotated service = $count, want only the user's own" >&2; exit 1; }
-      kubectl get service kubernetes -n default -o jsonpath='{.metadata.annotations.tunnel\.pizza/tunnel}' | grep -qx true
+      test "$count" = "1" || {
+        echo "annotations on the annotated service = $count, want only the 1 this suite set" >&2
+        kubectl get service kubernetes -n default -o jsonpath='{.metadata.annotations}' >&2
+        exit 1
+      }
+      kubectl get service kubernetes -n default -o jsonpath='{.metadata.annotations.tunnel\.pizza/tunnel}' | grep -qx ingress
 
-  # Traffic really does traverse the tunnel and reach the API server — and is
-  # then refused by it, which is the part worth knowing.
+  # A real 2xx from the API server, fetched over the public internet through a
+  # tunnel that was created by annotating a Service.
   #
-  # consts.OriginScheme is always http, because an Ingress carries no portable
-  # way to declare a TLS origin. The kubernetes Service's only port is 443
-  # speaking TLS, so the origin is http://kubernetes.default.svc:443 and the
-  # API server's TLS listener answers every request with a plaintext
-  # 400 "Client sent an HTTP request to an HTTPS server."
+  # This works because the controller detected that the origin speaks TLS and
+  # dialed it that way — nobody told it — and because libtunnel does not verify the origin's
+  # certificate, which it cannot: the API server's cert is signed by the cluster
+  # CA and no public chain covers it.
   #
-  # So this asserts the 400, not `ok`. That is not a workaround for a broken
-  # test: the 400 is proof the bytes went all the way through the tunnel to the
-  # API server and came back, which a 502 or 530 from the edge would not be.
-  # Getting `ok` here would require the controller to dial TLS origins, which
-  # is a change to OriginScheme and a deliberate decision about exposing an API
-  # server — not something to smuggle in through a test.
+  # What is exposed is bounded by RBAC rather than by us: the default
+  # system:public-info-viewer role grants system:unauthenticated exactly
+  # /healthz, /livez, /readyz and /version. Every other path answers 403 to an
+  # anonymous caller, which the second fetch here asserts — a tunnel to an API
+  # server that served more than that would be a very different thing to ship.
   #
   # The hostname is deliberately not echoed on failure.
   - script: |
@@ -42,13 +46,21 @@ commands:
 
       code=$(curl -sS --retry 10 --retry-delay 3 --retry-all-errors \
         -o /tmp/tunnel-healthz.out -w '%{http_code}' "https://$host/healthz")
-      test "$code" = "400" || {
-        echo "GET /healthz through the tunnel returned $code, want 400 from the API server's TLS listener" >&2
+      case "$code" in
+        2??) ;;
+        *)
+          echo "GET /healthz through the tunnel returned $code, want 2xx" >&2
+          sed -e 's/^/  body: /' /tmp/tunnel-healthz.out >&2
+          exit 1
+          ;;
+      esac
+      grep -qx 'ok' /tmp/tunnel-healthz.out || {
+        echo "2xx from /healthz did not carry the API server's 'ok'" >&2
         sed -e 's/^/  body: /' /tmp/tunnel-healthz.out >&2
         exit 1
       }
-      grep -q 'Client sent an HTTP request to an HTTPS server' /tmp/tunnel-healthz.out || {
-        echo "400 did not come from the API server's TLS listener; the tunnel may not reach it at all" >&2
-        sed -e 's/^/  body: /' /tmp/tunnel-healthz.out >&2
-        exit 1
-      }
+
+  - script: |
+      host=$(kubectl get ingress kubernetes-tunnel-pizza -n default -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+      code=$(curl -sS --retry 5 --retry-delay 3 --retry-all-errors -o /dev/null -w '%{http_code}' "https://$host/api/v1/namespaces/kube-system/secrets")
+      test "$code" = "403" || { echo "anonymous API access through the tunnel returned $code, want 403" >&2; exit 1; }

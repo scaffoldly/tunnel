@@ -37,12 +37,19 @@ func tcp(name string, port int32) corev1.ServicePort {
 	return corev1.ServicePort{Name: name, Port: port, Protocol: corev1.ProtocolTCP}
 }
 
+// appProto sets spec.ports[].appProtocol, the core field that says what a port
+// speaks.
+func appProto(p corev1.ServicePort, protocol string) corev1.ServicePort {
+	p.AppProtocol = &protocol
+	return p
+}
+
 func udp(name string, port int32) corev1.ServicePort {
 	return corev1.ServicePort{Name: name, Port: port, Protocol: corev1.ProtocolUDP}
 }
 
 // http is the ordinary case: one named TCP port.
-var http = tcp("http", 80)
+var httpPort = tcp("http", 80)
 
 // TestProviders covers the whole of provider resolution — both triggers, their
 // interaction, value parsing and port selection — because they are one pass
@@ -69,82 +76,79 @@ func TestProviders(t *testing.T) {
 				"tunnel.pizza/hostname":                            "lonely-ostrich.tunneled.pizza",
 				"tunnel.pizza/tunnelled":                           "true",
 				"api.trycloudflare.com/tunnel-port":                "8080",
-			}, http),
+			}, httpPort),
 		},
 		{
 			name: "one annotation is one tunnel, through the Ingress API by default",
-			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "true"}, http),
-			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}}},
+			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "ingress"}, httpPort),
+			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme}},
 		},
 		{
-			name: "True is true",
-			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "True"}, http),
-			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}}},
+			name: "the value is case-insensitive",
+			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "Ingress"}, httpPort),
+			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme}},
 		},
 		{
-			name: "1 is true",
-			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "1"}, http),
-			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}}},
+			name: "gateway asks for the Gateway branch",
+			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "gateway"}, httpPort),
+			want: []resolved{{provider: "tunnel.pizza", api: apiGateway, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme}},
 		},
 		{
-			name: "false is an explicit off, not an error",
-			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "false"}, http),
+			name: "none is an explicit off, not an error",
+			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "none"}, httpPort),
 		},
-		{
-			name: "0 is an explicit off",
-			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "0"}, http),
-		},
+
 		{
 			name:    "yes is the value someone will write, and it is an error",
-			svc:     svc(map[string]string{"tunnel.pizza/tunnel": "yes"}, http),
-			wantErr: `annotation tunnel.pizza/tunnel="yes" is not a boolean`,
+			svc:     svc(map[string]string{"tunnel.pizza/tunnel": "yes"}, httpPort),
+			wantErr: `annotation tunnel.pizza/tunnel="yes": must be "ingress", "gateway" or "none"`,
 		},
 		{
 			name:    "an empty value is an error, not an off",
-			svc:     svc(map[string]string{"tunnel.pizza/tunnel": ""}, http),
-			wantErr: `annotation tunnel.pizza/tunnel="" is not a boolean`,
+			svc:     svc(map[string]string{"tunnel.pizza/tunnel": ""}, httpPort),
+			wantErr: `annotation tunnel.pizza/tunnel="": must be "ingress", "gateway" or "none"`,
 		},
 		{
 			name:    "an unknown provider is a typo, and is reported",
-			svc:     svc(map[string]string{"tunnel.example.com/tunnel": "true"}, http),
+			svc:     svc(map[string]string{"tunnel.example.com/tunnel": "true"}, httpPort),
 			wantErr: `names unknown provider "tunnel.example.com"; known providers are tunnel.pizza, api.trycloudflare.com`,
 		},
 		{
 			name:    "a prefixless annotation names no provider",
-			svc:     svc(map[string]string{"tunnel": "true"}, http),
+			svc:     svc(map[string]string{"tunnel": "true"}, httpPort),
 			wantErr: `annotation "tunnel" names no provider`,
 		},
 		{
 			name: "the other provider works the same way",
-			svc:  svc(map[string]string{"api.trycloudflare.com/tunnel": "true"}, http),
-			want: []resolved{{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}}},
+			svc:  svc(map[string]string{"api.trycloudflare.com/tunnel": "ingress"}, httpPort),
+			want: []resolved{{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme}},
 		},
 		{
 			name: "two providers are two tunnels, in a fixed order",
 			svc: svc(map[string]string{
-				"tunnel.pizza/tunnel":          "true",
-				"api.trycloudflare.com/tunnel": "true",
-			}, http),
+				"tunnel.pizza/tunnel":          "ingress",
+				"api.trycloudflare.com/tunnel": "ingress",
+			}, httpPort),
 			want: []resolved{
-				{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}},
-				{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}},
+				{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme},
+				{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme},
 			},
 		},
 
 		// spec.loadBalancerClass.
 		{
 			name: "loadBalancerClass alone is a tunnel",
-			svc:  loadBalancer("tunnel.pizza", svc(nil, http)),
-			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}}},
+			svc:  loadBalancer("tunnel.pizza", svc(nil, httpPort)),
+			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme}},
 		},
 		{
 			name: "a foreign loadBalancerClass belongs to somebody else and is not an error",
-			svc:  loadBalancer("metallb.io/l2", svc(nil, http)),
+			svc:  loadBalancer("metallb.io/l2", svc(nil, httpPort)),
 		},
 		{
 			name: "loadBalancerClass is ignored unless the type is LoadBalancer",
 			svc: func() *corev1.Service {
-				s := svc(nil, http)
+				s := svc(nil, httpPort)
 				class := "tunnel.pizza"
 				s.Spec.LoadBalancerClass = &class // the API server forbids this combination
 				return s
@@ -152,166 +156,138 @@ func TestProviders(t *testing.T) {
 		},
 		{
 			name: "the same provider through both triggers is one tunnel",
-			svc:  loadBalancer("tunnel.pizza", svc(map[string]string{"tunnel.pizza/tunnel": "true"}, http)),
-			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}}},
+			svc:  loadBalancer("tunnel.pizza", svc(map[string]string{"tunnel.pizza/tunnel": "ingress"}, httpPort)),
+			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme}},
 		},
 		{
 			name: "two providers through two different triggers are two tunnels",
-			svc:  loadBalancer("tunnel.pizza", svc(map[string]string{"api.trycloudflare.com/tunnel": "true"}, http)),
+			svc:  loadBalancer("tunnel.pizza", svc(map[string]string{"api.trycloudflare.com/tunnel": "ingress"}, httpPort)),
 			want: []resolved{
-				{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}},
-				{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}},
+				{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme},
+				{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme},
 			},
 		},
 		{
 			name: "an explicit off overrides loadBalancerClass, which cannot be edited away",
-			svc:  loadBalancer("tunnel.pizza", svc(map[string]string{"tunnel.pizza/tunnel": "false"}, http)),
+			svc:  loadBalancer("tunnel.pizza", svc(map[string]string{"tunnel.pizza/tunnel": "none"}, httpPort)),
 		},
 		{
 			name: "an explicit off on one provider leaves the other alone",
 			svc: loadBalancer("tunnel.pizza", svc(map[string]string{
-				"tunnel.pizza/tunnel":          "false",
-				"api.trycloudflare.com/tunnel": "true",
-			}, http)),
-			want: []resolved{{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}}},
+				"tunnel.pizza/tunnel":          "none",
+				"api.trycloudflare.com/tunnel": "ingress",
+			}, httpPort)),
+			want: []resolved{{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme}},
 		},
 
-		// {provider}/tunnel-api.
 		{
-			name: "tunnel-api gateway opts into the Gateway branch",
-			svc: svc(map[string]string{
-				"tunnel.pizza/tunnel":     "true",
-				"tunnel.pizza/tunnel-api": "gateway",
-			}, http),
-			want: []resolved{{provider: "tunnel.pizza", api: apiGateway, port: servicePort{name: "http", number: 80}}},
+			name: "gateway through the loadBalancerClass trigger needs the annotation to say so",
+			svc:  loadBalancer("tunnel.pizza", svc(map[string]string{"tunnel.pizza/tunnel": "gateway"}, httpPort)),
+			want: []resolved{{provider: "tunnel.pizza", api: apiGateway, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme}},
 		},
 		{
-			name: "tunnel-api ingress is the default said out loud",
+			name: "the API is per provider",
 			svc: svc(map[string]string{
-				"tunnel.pizza/tunnel":     "true",
-				"tunnel.pizza/tunnel-api": "ingress",
-			}, http),
-			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}}},
-		},
-		{
-			name: "tunnel-api is case-insensitive",
-			svc: svc(map[string]string{
-				"tunnel.pizza/tunnel":     "true",
-				"tunnel.pizza/tunnel-api": "Gateway",
-			}, http),
-			want: []resolved{{provider: "tunnel.pizza", api: apiGateway, port: servicePort{name: "http", number: 80}}},
-		},
-		{
-			name: "tunnel-api applies to the loadBalancerClass trigger too",
-			svc:  loadBalancer("tunnel.pizza", svc(map[string]string{"tunnel.pizza/tunnel-api": "gateway"}, http)),
-			want: []resolved{{provider: "tunnel.pizza", api: apiGateway, port: servicePort{name: "http", number: 80}}},
-		},
-		{
-			name: "tunnel-api is per provider",
-			svc: svc(map[string]string{
-				"tunnel.pizza/tunnel":              "true",
-				"tunnel.pizza/tunnel-api":          "gateway",
-				"api.trycloudflare.com/tunnel":     "true",
-				"api.trycloudflare.com/tunnel-api": "ingress",
-			}, http),
+				"tunnel.pizza/tunnel":          "gateway",
+				"api.trycloudflare.com/tunnel": "ingress",
+			}, httpPort),
 			want: []resolved{
-				{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}},
-				{provider: "tunnel.pizza", api: apiGateway, port: servicePort{name: "http", number: 80}},
+				{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme},
+				{provider: "tunnel.pizza", api: apiGateway, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme},
+			},
+		},
+
+		// {provider}/protocol, and the core field it defers to.
+		{
+			name: "protocol https dials the origin over TLS",
+			svc: svc(map[string]string{
+				"tunnel.pizza/tunnel":   "ingress",
+				"tunnel.pizza/protocol": "https",
+			}, tcp("https", 8443)),
+			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "https", number: 8443}, protocol: consts.OriginSchemeTLS, declared: true}},
+		},
+		{
+			name: "protocol http is the default said out loud",
+			svc: svc(map[string]string{
+				"tunnel.pizza/tunnel":   "ingress",
+				"tunnel.pizza/protocol": "http",
+			}, httpPort),
+			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme, declared: true}},
+		},
+		{
+			name: "protocol is case-insensitive",
+			svc: svc(map[string]string{
+				"tunnel.pizza/tunnel":   "ingress",
+				"tunnel.pizza/protocol": "HTTPS",
+			}, httpPort),
+			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginSchemeTLS, declared: true}},
+		},
+		{
+			name: "grpc is refused rather than mapped onto https",
+			svc: svc(map[string]string{
+				"tunnel.pizza/tunnel":   "ingress",
+				"tunnel.pizza/protocol": "grpc",
+			}, httpPort),
+			wantErr: `annotation tunnel.pizza/protocol="grpc": must be "http" or "https"`,
+		},
+		{
+			name: "protocol is per provider",
+			svc: svc(map[string]string{
+				"tunnel.pizza/tunnel":            "ingress",
+				"tunnel.pizza/protocol":          "https",
+				"api.trycloudflare.com/tunnel":   "ingress",
+				"api.trycloudflare.com/protocol": "http",
+			}, httpPort),
+			want: []resolved{
+				{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme, declared: true},
+				{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginSchemeTLS, declared: true},
 			},
 		},
 		{
-			name: "an unknown tunnel-api value is an error",
+			name:    "a protocol naming no tunnel is a half-finished edit",
+			svc:     svc(map[string]string{"tunnel.pizza/protocol": "https"}, httpPort),
+			wantErr: `annotation tunnel.pizza/protocol names no tunnel; add tunnel.pizza/tunnel: "ingress"`,
+		},
+		{
+			name: "a protocol kept beside an explicit off is not an orphan",
 			svc: svc(map[string]string{
-				"tunnel.pizza/tunnel":     "true",
-				"tunnel.pizza/tunnel-api": "httproute",
-			}, http),
-			wantErr: `annotation tunnel.pizza/tunnel-api="httproute": must be "ingress" or "gateway"`,
+				"tunnel.pizza/tunnel":   "none",
+				"tunnel.pizza/protocol": "https",
+			}, httpPort),
 		},
 		{
-			name:    "a tunnel-api naming no tunnel is a half-finished edit",
-			svc:     svc(map[string]string{"tunnel.pizza/tunnel-api": "gateway"}, http),
-			wantErr: `annotation tunnel.pizza/tunnel-api names no tunnel`,
+			name: "appProtocol https needs no annotation at all",
+			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "ingress"}, appProto(tcp("web", 8443), "https")),
+			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "web", number: 8443, appProtocol: "https"}, protocol: consts.OriginSchemeTLS, declared: true}},
 		},
 		{
-			name: "a tunnel-api kept beside an explicit off is not an orphan",
+			name: "the annotation beats appProtocol, because it is the more specific statement",
 			svc: svc(map[string]string{
-				"tunnel.pizza/tunnel":     "false",
-				"tunnel.pizza/tunnel-api": "gateway",
-			}, http),
-		},
-
-		// Port selection.
-		{
-			name: "a single unnamed port is the port",
-			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "true"}, tcp("", 8080)),
-			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "", number: 8080}}},
+				"tunnel.pizza/tunnel":   "ingress",
+				"tunnel.pizza/protocol": "http",
+			}, appProto(tcp("web", 8443), "https")),
+			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "web", number: 8443, appProtocol: "https"}, protocol: consts.OriginScheme, declared: true}},
 		},
 		{
-			name: "a port with no protocol is TCP",
-			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "true"}, corev1.ServicePort{Name: "web", Port: 8080}),
-			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "web", number: 8080}}},
+			name: "an appProtocol this controller does not understand is ignored, not refused",
+			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "ingress"}, appProto(tcp("db", 5432), "mysql")),
+			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "db", number: 5432, appProtocol: "mysql"}, protocol: consts.OriginScheme}},
 		},
 		{
-			name: "http is preferred out of several",
-			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "true"}, tcp("grpc", 9090), tcp("http", 80), tcp("metrics", 9091)),
-			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}}},
-		},
-		{
-			name: "https is the second choice",
-			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "true"}, tcp("grpc", 9090), tcp("https", 443)),
-			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "https", number: 443}}},
-		},
-		{
-			name: "http beats https regardless of the order they appear in",
-			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "true"}, tcp("https", 443), tcp("http", 80)),
-			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}}},
-		},
-		{
-			name:    "several ports and no conventional name is refused, naming what was found",
-			svc:     svc(map[string]string{"tunnel.pizza/tunnel": "true"}, tcp("grpc", 9090), tcp("", 5432)),
-			wantErr: `2 TCP ports (grpc:9090, 5432), none named "http" or "https"`,
-		},
-		{
-			name:    "no ports at all is refused",
-			svc:     svc(map[string]string{"tunnel.pizza/tunnel": "true"}),
-			wantErr: "service exposes no ports",
-		},
-		{
-			name: "a UDP port is not a candidate, so one TCP port beside it is unambiguous",
-			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "true"}, udp("dns", 53), tcp("api", 8080)),
-			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "api", number: 8080}}},
-		},
-		{
-			name: "a UDP port named http does not win over a TCP port",
-			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "true"}, udp("http", 80), tcp("grpc", 9090)),
-			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "grpc", number: 9090}}},
-		},
-		{
-			name:    "a service with only UDP ports has nothing a tunnel can carry",
-			svc:     svc(map[string]string{"tunnel.pizza/tunnel": "true"}, udp("dns", 53), udp("", 5353)),
-			wantErr: "no TCP port to front; a tunnel carries HTTP over TCP and this service exposes only dns:53/UDP, 5353/UDP",
-		},
-		{
-			name: "the port is resolved once and shared by every provider",
-			svc: svc(map[string]string{
-				"tunnel.pizza/tunnel":          "true",
-				"api.trycloudflare.com/tunnel": "true",
-			}, tcp("grpc", 9090), tcp("http", 80)),
-			want: []resolved{
-				{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}},
-				{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "http", number: 80}},
-			},
+			name: "kubernetes.io/h2c is a legitimate appProtocol and means plaintext here",
+			svc:  svc(map[string]string{"tunnel.pizza/tunnel": "ingress"}, appProto(tcp("grpc", 9090), "kubernetes.io/h2c")),
+			want: []resolved{{provider: "tunnel.pizza", api: apiIngress, port: servicePort{name: "grpc", number: 9090, appProtocol: "kubernetes.io/h2c"}, protocol: consts.OriginScheme}},
 		},
 
 		// Precedence between the two kinds of failure.
 		{
 			name:    "a bad value is reported even though it would have left no tunnel",
 			svc:     svc(map[string]string{"tunnel.pizza/tunnel": "maybe"}, tcp("grpc", 9090), tcp("", 5432)),
-			wantErr: `annotation tunnel.pizza/tunnel="maybe" is not a boolean`,
+			wantErr: `annotation tunnel.pizza/tunnel="maybe"`,
 		},
 		{
 			name:    "ambiguous ports are not reported for a service that asked for nothing",
-			svc:     svc(map[string]string{"tunnel.pizza/tunnel": "false"}, tcp("grpc", 9090), tcp("", 5432)),
+			svc:     svc(map[string]string{"tunnel.pizza/tunnel": "none"}, tcp("grpc", 9090), tcp("", 5432)),
 			wantErr: "",
 		},
 	}
@@ -357,16 +333,14 @@ func TestProviders(t *testing.T) {
 // this order, and an unstable one orphans a child per reconcile.
 func TestProvidersOrderIsStable(t *testing.T) {
 	s := svc(map[string]string{
-		"tunnel.pizza/tunnel":              "true",
-		"tunnel.pizza/tunnel-api":          "gateway",
-		"api.trycloudflare.com/tunnel":     "true",
-		"api.trycloudflare.com/tunnel-api": "ingress",
-		"meta.helm.sh/release-name":        "web",
-	}, http)
+		"tunnel.pizza/tunnel":          "gateway",
+		"api.trycloudflare.com/tunnel": "ingress",
+		"meta.helm.sh/release-name":    "web",
+	}, httpPort)
 
 	want := []resolved{
-		{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}},
-		{provider: "tunnel.pizza", api: apiGateway, port: servicePort{name: "http", number: 80}},
+		{provider: "api.trycloudflare.com", api: apiIngress, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme},
+		{provider: "tunnel.pizza", api: apiGateway, port: servicePort{name: "http", number: 80}, protocol: consts.OriginScheme},
 	}
 
 	for i := range 100 {
@@ -387,9 +361,9 @@ func TestProvidersReportsTheSameErrorEveryTime(t *testing.T) {
 	s := svc(map[string]string{
 		"tunnel.pizza/tunnel":          "nope",
 		"api.trycloudflare.com/tunnel": "yes",
-	}, http)
+	}, httpPort)
 
-	const want = `annotation api.trycloudflare.com/tunnel="yes" is not a boolean`
+	const want = `annotation api.trycloudflare.com/tunnel="yes": must be "ingress", "gateway" or "none"`
 	for i := range 100 {
 		_, err := providers(s, known)
 		if err == nil {
@@ -406,8 +380,7 @@ func TestProvidersReportsTheSameErrorEveryTime(t *testing.T) {
 // corrupts every other reader in the process.
 func TestProvidersDoesNotMutateTheService(t *testing.T) {
 	s := loadBalancer("tunnel.pizza", svc(map[string]string{
-		"tunnel.pizza/tunnel":     "true",
-		"tunnel.pizza/tunnel-api": "gateway",
+		"tunnel.pizza/tunnel": "gateway",
 	}, tcp("grpc", 9090), tcp("http", 80)))
 	before := s.DeepCopy()
 

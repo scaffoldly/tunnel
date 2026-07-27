@@ -7,6 +7,7 @@ import (
 	"path"
 	"reflect"
 	"slices"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -50,6 +51,10 @@ type Reconciler struct {
 	// two caches then race.
 	Services client.Reader
 	Recorder events.EventRecorder
+	// Probe reports how an origin speaks when the Service did not say. Best
+	// effort and injectable: the production one opens a socket, which no unit
+	// test should.
+	Probe Prober
 	// Providers is the vocabulary a trigger may name. Injected rather than
 	// read from consts here so the resolution stays testable against a fixed
 	// set, and so widening it later is a change at one call site.
@@ -62,6 +67,7 @@ func New(mgr ctrl.Manager, _ config.Config) error {
 		Client:    mgr.GetClient(),
 		Services:  mgr.GetAPIReader(),
 		Recorder:  mgr.GetEventRecorder(ReporterName),
+		Probe:     Probe,
 		Providers: consts.InstalledProviders,
 	}
 
@@ -140,7 +146,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, nil
 	}
 
-	hostnames, err := r.reconcileChildren(ctx, &svc, wanted)
+	hostnames, retry, err := r.reconcileChildren(ctx, &svc, wanted)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -152,7 +158,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// not type LoadBalancer is rejected outright.
 	provider, ok := statusProvider(&svc, r.Providers)
 	if !ok {
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: retry}, nil
 	}
 	changed, err := r.publish(ctx, &svc, hostnames[provider])
 	if err != nil {
@@ -162,14 +168,21 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		logger.Info("published tunnel hostname to service status",
 			"provider", provider, "hostname", hostnames[provider])
 	}
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: retry}, nil
 }
 
 // reconcileChildren ensures one child per wanted provider, removes the rest,
 // and reports the hostname each child currently publishes.
-func (r *Reconciler) reconcileChildren(ctx context.Context, svc *corev1.Service, wanted []resolved) (map[string]string, error) {
+//
+// The second return is how long to wait before trying again, and is non-zero
+// only when an origin could not be reached to determine how it speaks. Nothing
+// else would bring us back: a backend becoming ready is not an event on the
+// Service or on its child.
+func (r *Reconciler) reconcileChildren(ctx context.Context, svc *corev1.Service, wanted []resolved) (map[string]string, time.Duration, error) {
+	logger := log.FromContext(ctx)
 	hostnames := make(map[string]string, len(wanted))
 	keep := make(map[string]struct{}, len(wanted))
+	var retry time.Duration
 
 	for _, want := range wanted {
 		if want.api != apiIngress {
@@ -178,9 +191,30 @@ func (r *Reconciler) reconcileChildren(ctx context.Context, svc *corev1.Service,
 			// Ingress ones has been lied to.
 			r.Recorder.Eventf(svc, nil, consts.EventTypeWarning, consts.ReasonUnsupported,
 				consts.ActionProvision, consts.MsgUnsupportedFmt,
-				fmt.Errorf("%w: the %q API is not implemented yet; omit %s/%s to use the Ingress branch",
-					consts.ErrUnsupported, want.api, want.provider, annotationTunnelAPI))
+				fmt.Errorf("%w: the %q API is not implemented yet; set %s/%s: %q to use the Ingress branch",
+					consts.ErrUnsupported, want.api, want.provider, annotationTunnel, apiIngress))
 			continue
+		}
+
+		// Only when the Service did not say. An explicit annotation or
+		// appProtocol is a statement of intent, and probing past it would let
+		// a momentarily-wrong backend override its own author.
+		if !want.declared {
+			address := originAddress(svc.Namespace, svc.Name, want.port.number)
+			switch scheme, err := r.Probe(ctx, address); {
+			case err != nil:
+				logger.Info("could not determine origin protocol", "address", address, "error", err)
+				r.Recorder.Eventf(svc, nil, consts.EventTypeWarning, consts.ReasonProtocol,
+					consts.ActionProvision, consts.MsgProtocolUnknownFmt,
+					address, err, want.protocol, want.provider, consts.ProtocolAnnotation)
+				retry = consts.TunnelRetryInterval
+			case scheme != want.protocol:
+				logger.Info("detected origin protocol", "address", address, "protocol", scheme)
+				r.Recorder.Eventf(svc, nil, consts.EventTypeNormal, consts.ReasonProtocol,
+					consts.ActionProvision, consts.MsgProtocolProbedFmt,
+					address, scheme, want.provider, consts.ProtocolAnnotation)
+				want.protocol = scheme
+			}
 		}
 
 		child, err := r.ensure(ctx, svc, want)
@@ -190,7 +224,7 @@ func (r *Reconciler) reconcileChildren(ctx context.Context, svc *corev1.Service,
 					consts.ActionProvision, consts.MsgUnsupportedFmt, err)
 				continue
 			}
-			return nil, err
+			return nil, 0, err
 		}
 
 		keep[child.Name] = struct{}{}
@@ -203,9 +237,9 @@ func (r *Reconciler) reconcileChildren(ctx context.Context, svc *corev1.Service,
 	}
 
 	if err := r.prune(ctx, svc, keep); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return hostnames, nil
+	return hostnames, retry, nil
 }
 
 // statusProvider reports which provider's hostname belongs in this Service's

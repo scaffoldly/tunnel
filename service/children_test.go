@@ -164,3 +164,18 @@ func TestChildPortIsTheResolvedOne(t *testing.T) {
 		t.Errorf("backend port = %d, want 8443", got)
 	}
 }
+
+// TestChildDeclaresTheProtocol: the child restates how its origin is dialed,
+// which is what the Ingress half reads. Without it the annotation on the
+// Service would resolve correctly and then reach nothing.
+func TestChildDeclaresTheProtocol(t *testing.T) {
+	for _, protocol := range []string{"http", "https"} {
+		ing := child(annotated(nil), resolved{
+			provider: "tunnel.pizza", api: apiIngress,
+			port: servicePort{number: 8443}, protocol: protocol,
+		})
+		if got := ing.Annotations["tunnel.pizza/protocol"]; got != protocol {
+			t.Errorf("child annotation = %q, want %q", got, protocol)
+		}
+	}
+}

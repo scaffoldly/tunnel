@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -47,9 +48,43 @@ func (r *Reconciler) origin(ctx context.Context, ing *networkingv1.Ingress) (*ur
 	}
 
 	return &url.URL{
-		Scheme: consts.OriginScheme,
-		Host:   fmt.Sprintf("%s.%s.%s:%d", b.service, ing.Namespace, consts.OriginDomain, port),
+		Scheme: scheme(ing, port),
+		Host:   fmt.Sprintf("%s.%s.%s:%d", b.service, ing.Namespace, consts.OriginDomain, port.Port),
 	}, nil
+}
+
+// scheme decides how the backend is dialed.
+//
+// An Ingress has no field for this — every controller spells it as its own
+// annotation, and this one is {provider}/protocol, where the provider is the
+// class the Ingress names. The Service's own spec.ports[].appProtocol is
+// honoured too, so a Service that already declares itself needs no annotation:
+// that field is core, has exactly the vocabulary wanted here, and is what a
+// user should be reaching for first.
+//
+// Anything unrecognised, in either place, means plaintext. This is the one
+// place a wrong value must not fail the tunnel: appProtocol has an open
+// vocabulary that belongs to the Service's author, and an Ingress annotation
+// that reads "HTTPS " with a stray space should serve rather than 502. The
+// Service controller validates the annotation strictly when it writes it, which
+// is where a typo can still be reported against the object the user edited.
+func scheme(ing *networkingv1.Ingress, port corev1.ServicePort) string {
+	if ing.Spec.IngressClassName != nil {
+		if declared, ok := ing.Annotations[*ing.Spec.IngressClassName+"/"+consts.ProtocolAnnotation]; ok {
+			return normalizeScheme(declared)
+		}
+	}
+	if port.AppProtocol != nil {
+		return normalizeScheme(*port.AppProtocol)
+	}
+	return consts.OriginScheme
+}
+
+func normalizeScheme(declared string) string {
+	if strings.EqualFold(declared, consts.OriginSchemeTLS) {
+		return consts.OriginSchemeTLS
+	}
+	return consts.OriginScheme
 }
 
 // single reduces an Ingress to the one Service backend it names, or explains
@@ -113,28 +148,31 @@ func single(ing *networkingv1.Ingress) (backend, error) {
 // Read through the uncached API reader: the manager's client would start an
 // informer over every Service in the cluster for what is a handful of reads
 // per Ingress change, and would need cluster-wide list/watch to do it.
-func (r *Reconciler) port(ctx context.Context, namespace string, b backend) (int32, error) {
+// Returns the whole ServicePort rather than its number: appProtocol rides on
+// it, and re-reading the Service to find that out would be a second round trip
+// for something already in hand.
+func (r *Reconciler) port(ctx context.Context, namespace string, b backend) (corev1.ServicePort, error) {
 	var svc corev1.Service
 	key := client.ObjectKey{Namespace: namespace, Name: b.service}
 	if err := r.Services.Get(ctx, key, &svc); err != nil {
 		if apierrors.IsNotFound(err) {
 			// Transient by assumption: the Service may simply not exist yet.
-			return 0, fmt.Errorf("service %s not found", key)
+			return corev1.ServicePort{}, fmt.Errorf("service %s not found", key)
 		}
-		return 0, fmt.Errorf("get service %s: %w", key, err)
+		return corev1.ServicePort{}, fmt.Errorf("get service %s: %w", key, err)
 	}
 
 	for _, p := range svc.Spec.Ports {
 		switch {
 		case b.portName != "" && p.Name == b.portName:
-			return p.Port, nil
+			return p, nil
 		case b.portName == "" && p.Port == b.port:
-			return p.Port, nil
+			return p, nil
 		}
 	}
 
 	if b.portName != "" {
-		return 0, fmt.Errorf("%w: service %s exposes no port named %q", errUnsupported, key, b.portName)
+		return corev1.ServicePort{}, fmt.Errorf("%w: service %s exposes no port named %q", errUnsupported, key, b.portName)
 	}
-	return 0, fmt.Errorf("%w: service %s exposes no port %d", errUnsupported, key, b.port)
+	return corev1.ServicePort{}, fmt.Errorf("%w: service %s exposes no port %d", errUnsupported, key, b.port)
 }

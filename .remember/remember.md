@@ -161,6 +161,52 @@ that already holds the name and is not ours is left alone with a warning event.
 **Removing the trigger deletes the child** — owner-reference GC does not cover
 that, only Service deletion, and it is the case a user hits first.
 
+## How the origin's scheme is decided
+
+`consts.OriginScheme` is no longer the whole answer. Three sources, most
+explicit first, and the distinction between "declared" and "defaulted" is
+load-bearing — only an undeclared origin is probed, and only an undeclared one
+may be overridden by what the probe finds.
+
+1. **`{provider}/protocol: http|https`** on the Service (Service controller) or
+   on the Ingress (Ingress half). Strictly validated where it is ours to
+   validate: an unknown value is an error on the Service, because that is the
+   object the user edited and where an event can still reach them. On the
+   Ingress an unparsable value falls back to plaintext rather than failing the
+   tunnel.
+2. **`spec.ports[].appProtocol`** on the selected port. Core Kubernetes, exactly
+   the vocabulary wanted, and a Service that already declares itself needs no
+   annotation at all. An `appProtocol` this controller does not recognise is
+   **ignored, never refused** — it is an open vocabulary belonging to the
+   Service's author, who may have set `mysql` or `kubernetes.io/h2c` for a
+   consumer that has nothing to do with us.
+3. **An active probe.** `service/probe.go` dials the origin the tunnel will
+   front and offers a TLS handshake. A completed handshake is strong evidence;
+   a refused one on a connection that opened is good evidence of plaintext; a
+   connection that never opens says **nothing** and is reported as undetermined
+   rather than as plaintext. Undetermined emits a warning naming the annotation
+   to set, builds the tunnel plaintext, and **requeues** — nothing else would
+   bring the controller back, because a backend becoming ready is not an event
+   on the Service or on its child.
+
+`Probe` is a field on the Reconciler so no unit test opens a socket, and
+`probeTimeout` is 3s because Reconcile is single-threaded per controller: a
+hung dial to one Service stalls every other Service in the cluster. `TestProbe`
+runs against real loopback listeners, including one that accepts and then says
+nothing.
+
+The result is written onto the **child Ingress** as `{provider}/protocol`,
+which is what the Ingress half actually reads. That keeps the generated object
+self-describing and lets a hand-written Ingress say the same thing the same
+way. It is not the provider annotation deleted in `1b90a58` and is not a route
+back to it: that one named which provider to mint from, duplicating the class
+name, while this names something no Ingress field can express.
+
+**libtunnel needs only an `https://` origin** — `WithLocalURL`'s scheme
+"declares how the origin is dialed", and verification is off, which is what
+makes an in-cluster origin reachable at all: a Service's certificate is signed
+by the cluster CA or self-signed, and neither is a public chain.
+
 ## Phase 1: `service` resolves, and nothing calls it yet
 
 `service/providers.go` is one pure function, `providers(*corev1.Service, known
@@ -196,9 +242,17 @@ Decisions in here that will look arbitrary later:
   one resolves rather than being refused for ambiguity it does not have. This
   is slightly beyond what decision 3 says; it only ever turns a refusal into a
   correct answer. Flagged to the coordinator, not smuggled.
-- **A `{provider}/tunnel-api` naming no tunnel is an error**, unless the same
-  provider also carries an explicit `false` — keeping the api line while
-  flipping the switch off is what the explicit off is for.
+- **`{provider}/tunnel` carries an enumeration, not a boolean**:
+  `ingress` | `gateway` | `none`. There is no `tunnel-api` any more — "give me
+  a tunnel" and "through which API" were never independent questions, and
+  splitting them made the off switch ambiguous (`tunnel: "false"` beside
+  `tunnel-api: "gateway"` is a sentence with two verbs). `none` is the explicit
+  off, and it matters more than it looks: a tunnel reached through
+  `spec.loadBalancerClass` cannot be turned off by editing that field, because
+  the API server makes it immutable once set.
+- **A `{provider}/protocol` naming no tunnel is an error**, unless the same
+  provider is explicitly `none` — keeping the protocol line while switching off
+  is what the explicit off is for.
 - `spec.loadBalancerClass` is read only when `spec.type` is `LoadBalancer`. The
   other combination is unreachable (see phase 0 above) and the check is there to
   say so, not to defend against it.
@@ -334,23 +388,28 @@ test asserts. Two things bound it.
   using when debugging a failure here. The comment saying so is in
   `01-annotate.yaml`, where someone debugging will actually read it.
 
-**The tunnel carries traffic to the API server, which then refuses it — and
-that is asserted, not assumed.** `consts.OriginScheme` is `http` and the `kubernetes` Service's only
-port is 443 speaking TLS, so the origin is `http://kubernetes.default.svc:443`.
-From inside the cluster that returns `HTTP/1.0 400 Bad Request` with the body
-`Client sent an HTTP request to an HTTPS server.` — every request through the
-tunnel fails at the origin. For contrast `https://` to the same port answers
-`403` (anonymous is forbidden), so even a scheme fix would not expose the API.
-This materially reduces what the test exposes, and it is a different risk than
-the one the exposure was accepted against.
+**The tunnel carries real traffic to the API server.** Measured first, when the
+origin scheme was still always `http`: the `kubernetes` Service's only port is
+443 speaking TLS, so the origin was `http://kubernetes.default.svc:443`, and
+from inside the cluster that returns `HTTP/1.0 400 Bad Request` with the body
+`Client sent an HTTP request to an HTTPS server.` Every request through the
+tunnel failed at the origin, which is what motivated protocol detection.
 
-The suite **asserts exactly that**, at Christian's request: it curls
-`https://<tunnel>/healthz` and requires a `400` carrying that body. The 400 is
-the proof — the bytes crossed the tunnel, reached the API server and came
-back, which a `502` or `530` from the edge would not show. Asserting `ok`
-instead would require the controller to dial TLS origins: a change to
-`consts.OriginScheme` and a deliberate decision about exposing an API server,
-not a test change.
+**The suite now proves the stronger thing.** The controller detects the TLS
+origin by probing it, dials it with `https`, and the suite asserts a real
+**2xx from `/healthz` carrying `ok`**, fetched over the public internet.
+Crucially the Service carries **one** annotation — `tunnel.pizza/tunnel:
+ingress` — and nothing about the protocol: the port is *named* https but
+declares no `appProtocol`, and a name is not a declaration. The child's
+`tunnel.pizza/protocol: https` annotation is asserted too, and nobody wrote it;
+that assertion is the only thing standing between working detection and a
+silently plaintext tunnel that 400s every request.
+
+What is exposed stays bounded by RBAC rather than by us, and the suite asserts
+that as well: the default `system:public-info-viewer` role grants
+`system:unauthenticated` exactly `/healthz`, `/livez`, `/readyz` and
+`/version`, all measured. A second fetch requires **403** from a real API path,
+so a tunnel that served more than that would fail the suite.
 
 Four real tunnels per full run now, not two: ingress, gateway and service one
 each, plus service-annotate's.

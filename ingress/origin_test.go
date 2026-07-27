@@ -186,3 +186,81 @@ func named(service, port string) networkingv1.IngressBackend {
 		},
 	}
 }
+
+// TestScheme covers how the backend is dialed, which has no field on an
+// Ingress and therefore has to come from somewhere less obvious.
+func TestScheme(t *testing.T) {
+	tests := []struct {
+		name        string
+		class       string
+		annotations map[string]string
+		appProtocol string
+		want        string
+	}{
+		{
+			name: "nothing declared is plaintext",
+			want: "http",
+		},
+		{
+			name:        "the class's own protocol annotation wins",
+			class:       "tunnel.pizza",
+			annotations: map[string]string{"tunnel.pizza/protocol": "https"},
+			want:        "https",
+		},
+		{
+			name:        "another class's annotation is not ours to read",
+			class:       "tunnel.pizza",
+			annotations: map[string]string{"api.trycloudflare.com/protocol": "https"},
+			want:        "http",
+		},
+		{
+			name:        "appProtocol https is honoured without any annotation",
+			class:       "tunnel.pizza",
+			appProtocol: "https",
+			want:        "https",
+		},
+		{
+			name:        "the annotation overrides appProtocol",
+			class:       "tunnel.pizza",
+			annotations: map[string]string{"tunnel.pizza/protocol": "http"},
+			appProtocol: "https",
+			want:        "http",
+		},
+		{
+			name:        "an appProtocol we do not understand is plaintext, never an error",
+			class:       "tunnel.pizza",
+			appProtocol: "mysql",
+			want:        "http",
+		},
+		{
+			name:        "a malformed annotation serves plaintext rather than failing the tunnel",
+			class:       "tunnel.pizza",
+			annotations: map[string]string{"tunnel.pizza/protocol": "HTTPS "},
+			want:        "http",
+		},
+		{
+			name:        "case is not significant",
+			class:       "tunnel.pizza",
+			annotations: map[string]string{"tunnel.pizza/protocol": "HTTPS"},
+			want:        "https",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ing := &networkingv1.Ingress{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "web", Annotations: tc.annotations},
+			}
+			if tc.class != "" {
+				ing.Spec.IngressClassName = &tc.class
+			}
+			port := corev1.ServicePort{Name: "http", Port: 8080}
+			if tc.appProtocol != "" {
+				port.AppProtocol = &tc.appProtocol
+			}
+			if got := scheme(ing, port); got != tc.want {
+				t.Errorf("scheme() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
