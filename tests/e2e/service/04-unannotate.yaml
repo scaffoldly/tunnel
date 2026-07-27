@@ -1,0 +1,12 @@
+# Removing the trigger must delete the child, and this is the case most likely
+# to be missed: owner-reference garbage collection covers the Service being
+# deleted, and covers nothing at all about an annotation going away while the
+# Service stays. Only explicit reconcile logic does that.
+#
+# It is also what tears down the tunnel this test opened to the API server —
+# see the note in 02-annotate.yaml about what happens when an earlier step
+# fails and this one never runs.
+apiVersion: kuttl.dev/v1beta1
+kind: TestStep
+commands:
+  - command: kubectl annotate service kubernetes --namespace default tunnel.pizza/tunnel-

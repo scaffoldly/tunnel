@@ -1,0 +1,33 @@
+# The annotation trigger, on a Service nobody wrote for this test: the API
+# server's own `kubernetes` Service in the default namespace. That is the whole
+# claim of this entry point — annotate a Service you already have, and it gets
+# a public hostname — and a fixture Service would not test it, because a
+# fixture is written for us.
+#
+# It also exercises the single-port path: one port named https, so port
+# selection has exactly one candidate and takes it.
+#
+# WHAT THIS COSTS, AND WHY THE LAST STEP MATTERS
+#
+# The child Ingress mints a real, public tunnel, because minting is triggered
+# by the child existing and not by what this test asserts. 04-unannotate.yaml
+# removes the annotation, which deletes the child and tears the tunnel down at
+# once rather than leaving it up until the API server's garbage collector gets
+# to it.
+#
+# A FAILING RUN NEVER REACHES THAT STEP. kuttl aborts a test at its first
+# failed step, and this annotation is on a pre-existing object in `default`, so
+# kuttl's own namespace cleanup will not revert it. What saves you normally is
+# that `make test-e2e` deletes the kind cluster afterwards, which kills the
+# controller and cancels every tunnel context with it.
+#
+# That backstop does NOT apply under --skip-delete, which is exactly the flag
+# you are using when you are debugging a failure here. If you are reading this
+# because a step above went red: the tunnel to your API server is still up.
+# Delete the cluster, or remove the annotation by hand:
+#
+#   kubectl annotate svc kubernetes -n default tunnel.pizza/tunnel-
+apiVersion: kuttl.dev/v1beta1
+kind: TestStep
+commands:
+  - command: kubectl annotate service kubernetes --namespace default tunnel.pizza/tunnel=true --overwrite

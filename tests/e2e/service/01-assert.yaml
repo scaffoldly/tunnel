@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+status:
+  readyReplicas: 1
+---
+# The child the controller wrote. Nobody applied this object: its name is
+# <service>-<provider with dots as dashes>, which has to be deterministic or
+# every reconcile orphans the last one.
+#
+# The ownerReference is the load-bearing part. It is what garbage-collects the
+# child when the Service goes, and it is what scopes every delete this
+# controller performs — the RBAC grants delete on ingresses cluster-wide
+# because RBAC cannot express "only objects you created".
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx-tunnel-pizza
+  labels:
+    app.kubernetes.io/managed-by: tunnel
+  ownerReferences:
+    - apiVersion: v1
+      kind: Service
+      name: nginx
+      controller: true
+spec:
+  ingressClassName: tunnel.pizza
+  defaultBackend:
+    service:
+      name: nginx
+      port:
+        number: 80
+---
+# The status write, which happens on this path and only this path. The
+# hostname is minted per run and cannot be asserted, but the ports can: they
+# are written only alongside a non-empty hostname, so asserting 80 and 443
+# proves a tunnel actually came up.
+#
+# That EXTERNAL-IP renders at all is the point of this entry point — the
+# absence of `ip` is asserted in 03-test.yaml, which kuttl's subset matching
+# cannot express here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+status:
+  loadBalancer:
+    ingress:
+      - ports:
+          - port: 80
+            protocol: TCP
+          - port: 443
+            protocol: TCP

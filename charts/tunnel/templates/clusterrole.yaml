@@ -3,7 +3,43 @@ Every rule here traces to a call site. An unused grant is a standing offer to
 whoever gets hold of this ServiceAccount, so nothing speculative goes in — new
 capability brings its rules in the same commit as the code that calls them.
 
-  ingresses (get/list/watch)     informer LIST/WATCH plus Reconcile's Get.
+  ingresses (get/list/watch      informer LIST/WATCH plus Reconcile's Get. The
+    +create/update/delete)       write verbs are the Service half: a Service
+                                 that asks for a tunnel gets a child Ingress
+                                 created for it, updated when the Service's
+                                 port or provider changes, and deleted when the
+                                 trigger is removed.
+
+                                 delete is the verb to be deliberate about, and
+                                 it is granted cluster-wide because RBAC cannot
+                                 express "only objects you created". The scoping
+                                 is metav1.IsControlledBy in prune(), which
+                                 compares the controller reference's UID: an
+                                 Ingress this controller did not create is never
+                                 a candidate, whatever its name. Owner-reference
+                                 GC covers the Service being deleted; this verb
+                                 covers the annotation being removed while the
+                                 Service stays, which is the ordinary case and
+                                 the one nothing else notices.
+
+  services (get/list/watch)      The Service half watches every Service in the
+                                 cluster — there is no field selector for "has
+                                 an annotation whose name half is tunnel" — and
+                                 reads the matching ones in full. The watch is
+                                 metadata-only, but RBAC does not distinguish:
+                                 the metadata endpoint is the same resource.
+
+  services/status (patch)        Only the spec.loadBalancerClass path, and only
+                                 to write a hostname the tunnel actually serves.
+                                 Note what is absent: no write verb on services
+                                 itself, so this controller cannot touch a
+                                 Service's spec or metadata even by mistake.
+                                 An annotated Service is left exactly as its
+                                 author wrote it, and that boundary lives here
+                                 rather than only in the code that respects it.
+
+                                 patch, not update: publish() sends a merge
+                                 patch computed against the object it read.
 
   ingresses/status (update)      Reconcile's publish() writes the hostname to
                                  status.loadBalancer.ingress[].hostname and
@@ -20,12 +56,10 @@ capability brings its rules in the same commit as the code that calls them.
                                  only have cluster-scoped owners, which rules
                                  out the Deployment.
 
-  services (get)                 (*Reconciler).port resolves a named port and
-                                 confirms it is exposed. Read through the
-                                 manager's *uncached* API reader, deliberately —
-                                 a cached Get would start an informer over every
-                                 Service in the cluster and need list/watch to do
-                                 it, for a handful of reads per Ingress change.
+                                 The Ingress and Gateway halves also read
+                                 Services here, through the manager's *uncached*
+                                 API reader: (*Reconciler).port resolves a named
+                                 port and confirms it is exposed.
 
   ingressclasses (+create)       Resolve spec.ingressClassName back to a
                                  controller, and to the provider the class is
@@ -109,13 +143,19 @@ metadata:
 rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses/status"]
     verbs: ["update"]
   - apiGroups: [""]
-    resources: ["namespaces", "services"]
+    resources: ["namespaces"]
     verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["services/status"]
+    verbs: ["patch"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingressclasses"]
     verbs: ["get", "list", "watch", "create"]

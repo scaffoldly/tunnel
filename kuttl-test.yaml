@@ -15,9 +15,15 @@ artifactsDir: .kuttl
 # Default is 30s per step. Minting a tunnel and waiting for the edge to answer
 # takes longer than that on a cold run.
 timeout: 180
-# Serial. Both tests mint a real tunnel against a live provider, and running
-# them together doubles the concurrent load for no wall-clock gain — the mint
-# is the long pole either way.
+# Serial. Every test mints real tunnels against a live provider, and running
+# them together multiplies the concurrent load for no wall-clock gain — the
+# mint is the long pole either way.
+#
+# Four tunnels per run, not two: ingress and gateway mint one each, and the
+# service suite mints two — one for the type: LoadBalancer fixture and one for
+# the annotated `kubernetes` Service, which fronts the API server's own
+# Service. See tests/e2e/service/02-annotate.yaml for what that costs and how
+# it is torn down.
 parallel: 1
 
 commands:

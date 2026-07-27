@@ -5,7 +5,7 @@ Where the two overlap the definition wins, **except where this file says the
 definition is out of date**. The one place that mattered — the provider
 annotation cascade — has since been corrected in the definition itself.
 
-## State — HEAD `5c40e97`, pushed, CI green, working tree clean
+## State — HEAD `PENDING`, pushed, CI green, working tree clean
 
 In order: `1b90a58` Ingress provisioning with libtunnel, `28b8f31`
 served ports in status, `21e9ba0` ownerReferences on installed classes,
@@ -14,7 +14,8 @@ bundled Gateway API CRDs + `--install` split into three, `b4143ff` CRD bundle
 generated from the module, `6f572e3` Gateway provisioning, `502deca`
 GatewayClass Accepted + its tests, `5250558` the prose sweep and the
 regenerated manifest, `9f7e5d0` GatewayClass SupportedVersion, `5c40e97`
-provider resolution for annotation-driven tunnels (phase 1).
+provider resolution for annotation-driven tunnels (phase 1), `PENDING` the
+Service controller and its e2e (phase 2).
 
 **Both halves provision.** Ingress and Gateway each mint a real tunnel and
 publish the hostname — Ingress to `status.loadBalancer.ingress[].hostname`,
@@ -24,8 +25,8 @@ of wrong prose that used to live at the bottom of this file is cleared.
 
 Eleven packages: `.`, `config`, `consts`, `gateway`, `healthz`, `ingress`,
 `metrics`, `readyz`, `service`, `tunnels`, plus `charts/tunnel`. `service` is
-newest and is not wired to anything yet — see the phase 1 section below.
-`tunnels` came before it — the
+newest: it turns a Service that asks for a tunnel into a child Ingress that
+gets one. `tunnels` came before it — the
 tunnel store moved there out of `ingress/tunnel.go`, because both halves need
 it and neither owns it. `tunnels.Dial` takes a `metav1.Object`, so an
 `IngressClass` and a `GatewayClass` both satisfy it; the class's **name** is the
@@ -76,18 +77,19 @@ the design did not expect. Everything here was observed on kind, server
   `<none>` under EXTERNAL-IP for ClusterIP and NodePort Services regardless of
   status, and the hostname for a `type: LoadBalancer` one.
 
-Christian is deciding what replaces the "backfill always" half of decision 2;
-it lands in phase 2, not phase 1. The narrow reading — mirror the hostname to
-an annotation on every path, backfill status only on the `loadBalancerClass`
-path, which is `type: LoadBalancer` by definition — costs the user nothing
-visible, but it is his call.
+**Decision 2 has since been rewritten twice and is settled**: split by trigger.
+The annotation path writes nothing at all; the `loadBalancerClass` path writes
+status. The mirrored `{provider}/hostname` annotation that this finding first
+suggested was considered and **killed** — nothing writes that key. See the
+phase 2 section.
 
 Adjacent facts from the same session, expensive to rediscover:
 
 - A `metadata` or `spec` update on a **LoadBalancer** Service does *not* clobber
   `status.loadBalancer`. Annotating one and then adding a port both left the
-  hostname in place, so writing the mirror annotation cannot wipe the status
-  entry and the two writes need no ordering.
+  hostname in place. This mattered when a second write to the Service was still
+  planned; it is now only reassurance that another controller touching the
+  Service does not wipe what we published.
 - Flipping `type` from `LoadBalancer` back to `ClusterIP` while status is set is
   **accepted** and clears status automatically. A user downgrading a Service is
   not a case the controller has to unwedge.
@@ -101,6 +103,63 @@ Adjacent facts from the same session, expensive to rediscover:
 - Dotted class values are legal: both `tunnel.pizza` and `api.trycloudflare.com`
   are accepted as `loadBalancerClass`. It is validated as a qualified name, and
   dots are legal in the name half, so the provider vocabulary needs no mangling.
+
+## Phase 2: the Service controller, Ingress branch
+
+`service/service.go`, `children.go`, `status.go`. Both triggers reach one
+reconciler; the child is an Ingress; the Gateway branch is refused with an
+event until phase 3.
+
+**How `spec.loadBalancerClass` gets watched, since a metadata watch cannot see
+it.** Three facts settled it, all measured (apiserver v1.35.0): Services do
+**not** maintain `metadata.generation` — it is absent, where a Deployment's is
+`1` — so an update predicate cannot key on a spec change; `spec.type` **is** a
+supported field selector for Services but `spec.loadBalancerClass` is **not**
+(`field label not supported`); and the class can appear on an update, not only
+at creation, because it may be set when a Service's type changes to
+LoadBalancer.
+
+So: **one metadata-only watch over all Services, every event enqueued, and the
+full Service read through `mgr.GetAPIReader()`.** Memory stays proportional to
+Service count, which is the constraint the design set. The cost is an uncached
+GET per Service event — Services are low-churn, so this is a startup burst of
+one GET each and very little after. The alternative, rejected as a design
+change rather than taken quietly, is a spec-cached informer field-selected to
+`spec.type=LoadBalancer`: precise and small, since LoadBalancer Services are
+rare, but it caches specs and that was the coordinator's call, not mine.
+
+Do **not** switch the Service read to the cached client. controller-runtime
+builds a second, structured informer for any type you Get through the cache,
+on top of the metadata one, and its own docs say the two then race.
+
+**What is written where.** Decision 2 in its final form splits by trigger: the
+annotation path writes **nothing** to the Service, the `loadBalancerClass` path
+writes `status.loadBalancer.ingress[]` with `hostname` and ports 80/443 and no
+`ip`. The RBAC is where that boundary cannot erode — `services` is
+get/list/watch with **no write verb**, and `services/status` is `patch` alone.
+`publish` sends a merge patch, so `patch` and not `update` is the right verb.
+
+Verified on a cluster before building on it, because the inference had already
+been wrong twice:
+
+- `status.loadBalancer.ingress[].ports` **persists** — hostname and ports
+  round-trip exactly, `ip` absent from the stored entry.
+- Status ports need **no correspondence** with `spec.ports`. A Service
+  declaring only `8080` accepted status ports 80 and 443. There is no
+  validation there at all: `port: 70000` was also accepted, and
+  `PortStatus.Error` took `"THIS IS NOT A QUALIFIED NAME"`. Nothing will catch
+  a wrong value, so the controller has to be right on its own.
+
+**Child objects.** `<service>-<provider with dots as dashes>`, hash-suffixed
+past 253 characters. Service names cannot contain dots, so the result never
+does either and only the 253 limit is reachable. `spec.defaultBackend`, not a
+rule — one origin, no paths. `metav1.NewControllerRef` to the Service; every
+delete is scoped by `metav1.IsControlledBy`, which is the only thing standing
+between a cluster-wide `delete` grant and somebody else's Ingress. An Ingress
+that already holds the name and is not ours is left alone with a warning event.
+
+**Removing the trigger deletes the child** — owner-reference GC does not cover
+that, only Service deletion, and it is the case a user hits first.
 
 ## Phase 1: `service` resolves, and nothing calls it yet
 
@@ -164,8 +223,10 @@ scanned in map order; `loadBalancerClass` read regardless of type; a foreign
 class claimed as ours; default API flipped to gateway; unknown `tunnel-api`
 defaulted instead of refused; errors no longer wrapping `ErrUnsupported`; and
 the mirrored `{provider}/hostname` annotation read as the trigger. The last one
-is the one to keep: phase 2 writes that annotation, and a controller that reads
-its own output as input loops.
+is still worth keeping, but not for the reason it was written: decision 2 has
+since killed the mirrored annotation, so nothing writes that key. It stays
+because a *user* can write it, and a controller that treats an arbitrary
+`{provider}/hostname` as a request for a tunnel is wrong whoever set it.
 
 Two tests exist only to survive Go's randomised map iteration —
 `TestProvidersOrderIsStable` and `TestProvidersReportsTheSameErrorEveryTime`,
@@ -245,6 +306,42 @@ crds` after a go.mod bump is not something anyone has to remember.
 `.dockerignore` is an allow-list and re-includes
 `gateway/crds/zz_generated.*.yaml` by negation — that is why `Dockerfile` line 1
 is `# check=skip=CopyIgnoredFile`.
+
+## The service e2e annotates the API server's own Service
+
+`tests/e2e/service/` has two cases. The `loadBalancerClass` one is an ordinary
+nginx fixture and carries the `status.loadBalancer` assertions. The annotation
+one annotates **`kubernetes` in `default`** — the API server's own Service —
+because a fixture Service is written for us and therefore proves nothing about
+annotating a Service you already have. Christian decided this after being told
+what it costs.
+
+What it costs: a real public tunnel is minted fronting the kube-apiserver,
+because minting is triggered by the child Ingress existing and not by what the
+test asserts. Two things bound it.
+
+- `04-unannotate.yaml` removes the annotation as the last step, which deletes
+  the child and tears the tunnel down at once.
+- **A failing run never reaches that step.** kuttl aborts at the first failed
+  step, and the annotation is on a pre-existing object in `default`, so kuttl's
+  namespace cleanup will not revert it. The backstop is that the kind cluster
+  is deleted afterwards, which cancels every tunnel context — and that backstop
+  **does not apply under `--skip-delete`**, which is exactly the flag you are
+  using when debugging a failure here. The comment saying so is in
+  `02-annotate.yaml`, where someone debugging will actually read it.
+
+**The tunnel does not carry traffic, and that was measured rather than
+assumed.** `consts.OriginScheme` is `http` and the `kubernetes` Service's only
+port is 443 speaking TLS, so the origin is `http://kubernetes.default.svc:443`.
+From inside the cluster that returns `HTTP/1.0 400 Bad Request` with the body
+`Client sent an HTTP request to an HTTPS server.` — every request through the
+tunnel fails at the origin. For contrast `https://` to the same port answers
+`403` (anonymous is forbidden), so even a scheme fix would not expose the API.
+This materially reduces what the test exposes, and it is a different risk than
+the one the exposure was accepted against.
+
+Four real tunnels per full run now, not two: ingress and gateway one each, the
+service suite two.
 
 ## e2e: kuttl, `make test-e2e`, both suites green
 

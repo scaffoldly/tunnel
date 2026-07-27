@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - name: http
+              containerPort: 80
+---
+# The loadBalancerClass trigger. On bare metal this Service would sit at
+# <pending> forever, because nothing implements type: LoadBalancer — that is
+# the state this entry point exists to land on.
+#
+# The class value is the provider, exactly as the class name is for a
+# hand-written Ingress. It is also immutable: the API server refuses to set it
+# on an existing Service and refuses to change it, so a Service carrying it was
+# written for this controller and could not have arrived here by accident.
+#
+# allocateLoadBalancerNodePorts: false is the documented tidy-up. type:
+# LoadBalancer allocates a NodePort per port by default, for a cloud load
+# balancer that does not exist here — the tunnel dials the ClusterIP. The
+# controller never sets this itself; it is the user's spec.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tunnel.pizza
+  allocateLoadBalancerNodePorts: false
+  selector:
+    app: nginx
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

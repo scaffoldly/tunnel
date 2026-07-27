@@ -1,0 +1,8 @@
+# kuttl fails the step if anything here exists. The child must be gone once the
+# annotation is, which is both the teardown this suite depends on and the
+# behaviour a user expects when they undo the one line they added.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kubernetes-tunnel-pizza
+  namespace: default

@@ -1,0 +1,50 @@
+# The assertions kuttl's YAML matching cannot make: that traffic actually
+# reaches the backend through the tunnel, that a field is *absent*, and that an
+# object was not written to at all.
+#
+# One script per claim, so a failure names which one broke.
+apiVersion: kuttl.dev/v1beta1
+kind: TestStep
+commands:
+  # http and https are separate scripts for the same reason as in the other
+  # suites: the edge answers plaintext on 80 rather than redirecting, to match
+  # a Cloudflare quick tunnel, and a failure should say which scheme broke.
+  - script: |
+      host=$(kubectl get service nginx -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+      test -n "$host" || { echo "no hostname on service/nginx status" >&2; exit 1; }
+      curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "http://$host/" | grep -q 'Welcome to nginx'
+
+  - script: |
+      host=$(kubectl get service nginx -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+      test -n "$host" || { echo "no hostname on service/nginx status" >&2; exit 1; }
+      curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "https://$host/" | grep -q 'Welcome to nginx'
+
+  # No ip, deliberately, and asserted because nothing else would notice it
+  # coming back. Setting one would make ipMode mandatory and would claim a
+  # Cloudflare anycast address this controller does not own — and an address
+  # that looks connectable but routes on SNI is worse than none.
+  - script: |
+      ip=$(kubectl get service nginx -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+      test -z "$ip" || { echo "status.loadBalancer.ingress[0].ip is set to '$ip', want unset" >&2; exit 1; }
+
+  # The status hostname is a copy of the child's, not a second source of truth.
+  # If these ever disagree the Service is advertising something the tunnel does
+  # not serve.
+  - script: |
+      svc=$(kubectl get service nginx -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+      ing=$(kubectl get ingress nginx-tunnel-pizza -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+      test -n "$ing" || { echo "child ingress published no hostname" >&2; exit 1; }
+      test "$svc" = "$ing" || { echo "service says '$svc', child says '$ing'" >&2; exit 1; }
+
+  # The annotation path writes NOTHING to the Service. This is half of decision
+  # 2 and it regresses silently: a status write here would be rejected by the
+  # API server, but an annotation would succeed and nobody would notice.
+  #
+  # Exactly one annotation, the one 02-annotate.yaml added. The kubernetes
+  # Service ships with none of its own.
+  - script: |
+      status=$(kubectl get service kubernetes -n default -o jsonpath='{.status.loadBalancer.ingress}')
+      test -z "$status" || { echo "status.loadBalancer.ingress on the annotated service = '$status', want empty" >&2; exit 1; }
+      count=$(kubectl get service kubernetes -n default -o go-template='{{ len .metadata.annotations }}')
+      test "$count" = "1" || { echo "annotations on the annotated service = $count, want only the user's own" >&2; exit 1; }
+      kubectl get service kubernetes -n default -o jsonpath='{.metadata.annotations.tunnel\.pizza/tunnel}' | grep -qx true

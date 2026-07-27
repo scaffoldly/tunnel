@@ -72,6 +72,16 @@ const (
 	ControllerIngress      = "ingress"
 	ControllerGateway      = "gateway"
 	ControllerGatewayClass = "gatewayclass"
+	ControllerService      = "service"
+)
+
+// LabelManagedBy marks the objects this controller creates on a user's behalf.
+// The ownerReference is what makes them collectable and what scopes deletion;
+// this is for the human running `kubectl get ingress -l
+// app.kubernetes.io/managed-by=tunnel` and wondering where an object came from.
+const (
+	LabelManagedBy = "app.kubernetes.io/managed-by"
+	ManagedBy      = "tunnel"
 )
 
 // Flag names and their defaults.
@@ -101,6 +111,13 @@ const (
 	ReasonTunnelReady  = "TunnelReady"
 	ReasonTunnelFailed = "TunnelFailed"
 	ReasonUnsupported  = "Unsupported"
+	// ReasonProvisioning names the child object a Service's tunnel is being
+	// built through. A Service annotated for a tunnel does not carry the
+	// tunnel itself — a child Ingress does — so a failure surfaces one object
+	// away from where the user asked for it. This event is what makes
+	// `kubectl describe svc` point at the right object instead of leaving a
+	// scavenger hunt.
+	ReasonProvisioning = "Provisioning"
 
 	ActionProvision = "Provision"
 )
@@ -160,6 +177,16 @@ const (
 	MsgTunnelFailedFmt = "tunnel failed: %v"
 	// MsgUnsupportedFmt takes the reason this object cannot be served.
 	MsgUnsupportedFmt = "cannot serve this object: %v"
+
+	// MsgProvisioningFmt takes the child object's kind and name, and the
+	// provider. Emitted on the Service, because that is the object the user
+	// touched and the only one they know to look at.
+	MsgProvisioningFmt = "%s %s reconciled for provider %s; that object carries the tunnel's own status and events"
+	// MsgChildConflictFmt takes the child's kind and name. Emitted when the
+	// name a Service's child would take is already held by an object this
+	// controller does not own — the collision the ownerReference cannot
+	// prevent, only detect.
+	MsgChildConflictFmt = "%s %s already exists and is not owned by this Service; not touching it"
 )
 
 // Origin is how an Ingress backend is turned into the local URL a tunnel

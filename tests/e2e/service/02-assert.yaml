@@ -1,0 +1,30 @@
+# One annotation on a Service that already existed, and a child Ingress appears
+# for it, classed for the provider named in the annotation's prefix.
+#
+# The namespace is spelled out because this object is not in the namespace
+# kuttl generated for this test — the point is that the trigger works on a
+# Service the test did not create.
+#
+# The class is what the assertion is really about: the prefix of
+# `tunnel.pizza/tunnel` became `ingressClassName: tunnel.pizza`, which is the
+# same vocabulary a hand-written Ingress uses. No new concept, and nothing here
+# that the user could not have written themselves.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kubernetes-tunnel-pizza
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: tunnel
+  ownerReferences:
+    - apiVersion: v1
+      kind: Service
+      name: kubernetes
+      controller: true
+spec:
+  ingressClassName: tunnel.pizza
+  defaultBackend:
+    service:
+      name: kubernetes
+      port:
+        number: 443
