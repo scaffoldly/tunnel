@@ -126,6 +126,20 @@ const (
 	// MsgClassAcceptedFmt is the GatewayClass Accepted condition's message.
 	// Takes the provider host, which is the class's own name.
 	MsgClassAcceptedFmt = "Gateways on this class get a tunnel minted from https://%s/tunnel"
+
+	// The GatewayClass SupportedVersion condition's messages. Both take what
+	// was found in the cluster and the major.minor this build supports, in
+	// that order: upstream asks that the message name the detected CRD
+	// versions and the supported ones, since the status alone cannot say which
+	// of the two disagreed. The trailing .x is not decoration — patch
+	// releases may not change the schema, so the whole patch series is
+	// supported and the message should say so.
+	MsgClassSupportedVersionFmt = "Gateway API CRDs %s, which this controller supports (%s.x)"
+	// MsgClassUnsupportedVersionFmt says serving continues, because it does —
+	// this controller reports an unrecognized version rather than refusing to
+	// serve the class over one.
+	MsgClassUnsupportedVersionFmt = "Gateway API CRDs %s; this controller is built for %s.x. " +
+		"Gateways on this class are still served, on a best-effort basis"
 	// MsgTunnelReadyFmt takes the public hostname and the provider host.
 	MsgTunnelReadyFmt = "tunnel ready at https://%s/ (minted from https://%s/tunnel)"
 	// MsgTunnelFailedFmt takes the error that ended the tunnel.

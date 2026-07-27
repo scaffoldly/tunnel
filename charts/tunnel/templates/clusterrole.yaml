@@ -50,7 +50,9 @@ capability brings its rules in the same commit as the code that calls them.
                                  to publish Accepted, so the class reports
                                  Accepted=True with the generation it observed.
                                  A conformant consumer may refuse a class its
-                                 controller has not accepted.
+                                 controller has not accepted. SupportedVersion
+                                 rides along, which the spec requires whenever a
+                                 class is accepted.
 
   events.k8s.io/events           mgr.GetEventRecorder is the events.k8s.io/v1
                                  client: it creates an event and patches it as
@@ -73,6 +75,14 @@ capability brings its rules in the same commit as the code that calls them.
                                  implementations share one set and deleting them
                                  destroys every Gateway object in the cluster.
                                  Withholding the verb means a bug cannot do it.
+
+                                 list is also read with --install-gateway-api
+                                 off: the GatewayClass SupportedVersion
+                                 condition is the bundle-version annotation on
+                                 whatever CRDs the cluster serves, whoever
+                                 installed them. Dropping this rule alongside
+                                 the flag would leave the class unable to say
+                                 what it supports.
 
 Deliberately absent:
 

@@ -11,6 +11,13 @@
 # provisioned and served. Gateway API requires the implementing controller to
 # publish it, and observedGeneration is what tells a current condition from a
 # stale one.
+#
+# SupportedVersion MUST accompany Accepted, and True here is a real end-to-end
+# claim rather than a restatement of a constant: the controller installed these
+# CRDs itself moments earlier, then read the bundle-version annotation back off
+# the API server and compared it against the release it was built for. Nothing
+# in the unit tests covers that round trip. It says v1.6 because that is what
+# go.mod resolves to; TestSupportedVersionsPin fails here when it moves.
 apiVersion: gateway.networking.k8s.io/v1
 kind: GatewayClass
 metadata:
@@ -22,6 +29,10 @@ status:
     - type: Accepted
       status: "True"
       reason: Accepted
+      observedGeneration: 1
+    - type: SupportedVersion
+      status: "True"
+      reason: SupportedVersion
       observedGeneration: 1
 ---
 apiVersion: gateway.networking.k8s.io/v1
@@ -35,4 +46,8 @@ status:
     - type: Accepted
       status: "True"
       reason: Accepted
+      observedGeneration: 1
+    - type: SupportedVersion
+      status: "True"
+      reason: SupportedVersion
       observedGeneration: 1

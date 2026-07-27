@@ -4,24 +4,31 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"golang.org/x/mod/semver"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayconsts "sigs.k8s.io/gateway-api/pkg/consts"
 )
 
 // Annotations every Gateway API CRD carries, and the two things the upstream
 // rules are expressed in terms of.
+//
+// Taken from the gateway-api module's own consts rather than spelled out, for
+// the same reason ControllerName is read by reflection: a string that must
+// equal someone else's string should be that string.
 const (
-	annotationBundleVersion = "gateway.networking.k8s.io/bundle-version"
-	annotationChannel       = "gateway.networking.k8s.io/channel"
+	annotationBundleVersion = gatewayconsts.BundleVersionAnnotation
+	annotationChannel       = gatewayconsts.ChannelAnnotation
 )
 
 // crdYAML is the standard channel bundle, copied from the gateway-api module
@@ -37,10 +44,27 @@ const (
 //go:embed crds/zz_generated.standard-install.yaml
 var crdYAML []byte
 
-// bundledVersion is the release the vendored bundle must carry. A test pins it
-// against the file, so `make crds` after a go.mod bump is not something anyone
-// has to remember.
-const bundledVersion = "v1.6.1"
+// bundledVersion is the Gateway API release this controller is built for:
+// the version the module the compiler resolved says it is, not a string
+// maintained here. TestBundleVersionMatchesGoMod pins the embedded YAML to it,
+// so `make crds` after a go.mod bump is not something anyone has to remember —
+// and now a bump cannot leave this constant behind either.
+//
+// Two things read it: installCRDs, which will not overwrite something newer,
+// and checkVersions, which decides the GatewayClass SupportedVersion condition.
+const bundledVersion = gatewayconsts.BundleVersion
+
+// supportedVersions is the range checkVersions accepts, and the range the
+// SupportedVersion condition advertises. Major and minor only.
+//
+// Upstream's versioning policy is that a patch release may not change the
+// schema, so v1.6.0 and v1.6.1 are the same API to anyone reading it — pinning
+// the patch would report a cluster unsupported over a difference that cannot
+// affect us. Minor is where fields appear and validation tightens, so it is
+// the boundary worth checking. This is also what the reference implementation
+// does: nginx-gateway-fabric compares major and minor against upstream's
+// consts.BundleVersion and ignores the patch.
+var supportedVersions = semver.MajorMinor(bundledVersion)
 
 // installCRDs makes a cluster serve the Gateway API when it does not already.
 //
@@ -134,6 +158,136 @@ func decide(existing, ours *apiextensionsv1.CustomResourceDefinition) (bool, str
 	}
 
 	return true, fmt.Sprintf("cluster has %s, bundled is newer at %s", have, want)
+}
+
+// versionReport is what the cluster's Gateway API CRDs say about themselves,
+// reduced to the two things the SupportedVersion condition needs.
+type versionReport struct {
+	// supported is the condition's status. False is not a refusal to serve —
+	// see checkVersions.
+	supported bool
+	// detail is the middle of the condition's message: what was found, in the
+	// cluster's own terms. Upstream asks that the message name both the
+	// detected versions and the supported ones.
+	detail string
+}
+
+// checkVersions decides the GatewayClass SupportedVersion condition by reading
+// the bundle-version annotation off every Gateway API CRD the cluster serves.
+//
+// # The policy, and why it is this one
+//
+// Upstream defines the input precisely and leaves the judgement to us:
+//
+//	The version of a Gateway API CRD is defined by the
+//	gateway.networking.k8s.io/bundle-version annotation on the CRD. If
+//	implementations detect any Gateway API CRDs that either do not have this
+//	annotation set, or have it set to a version that is not recognized or
+//	supported by the implementation, this condition MUST be set to false.
+//
+// So: an unannotated CRD is False, not an exemption. That is worth stating
+// because the opposite reads as the kinder choice — a missing annotation is
+// missing metadata, not a wrong version — but the whole point of the condition
+// is that an implementation cannot vouch for CRDs it cannot identify. The
+// distinction survives in the message, which is where upstream puts it, rather
+// than in the status.
+//
+// Recognized means the same major and minor as the release we are built for;
+// see supportedVersions for why the patch is ignored.
+//
+// # False does not stop provisioning
+//
+// Upstream offers two behaviours for unrecognized CRDs and we take the first
+// explicitly: "best effort" support, Accepted=True with SupportedVersion=False.
+// The alternative — refusing the class with Accepted=False — would mean a
+// GatewayClass whose Gateways demonstrably provision and serve reports itself
+// unusable, which is the exact bug this package shipped for a release and the
+// exact way a conformant consumer gets talked out of a working class. The
+// reference implementation takes the harder line and it has cost its users:
+// nginx-gateway-fabric refuses the class outright, and one unannotated CRD
+// left behind in a cluster is enough to do it (nginx/nginx-gateway-fabric#4762).
+//
+// It is also proportionate to what this controller actually reads: a
+// GatewayClass's name and controllerName, a Gateway's gatewayClassName, and an
+// HTTPRoute's parentRefs and backendRefs. Those fields are unchanged since
+// v1.0. A version skew that breaks them is possible; one that breaks them
+// silently, in a way an outright refusal would have caught, is not worth the
+// cost of refusing every skew.
+//
+// # Channel is not part of this
+//
+// A cluster running the experimental channel at our version is running a
+// superset of our schema, and every field above is in both channels.
+// installCRDs cares about the channel because writing across channels drops
+// data; reading does not. Reporting an experimental install unsupported would
+// under-report, which is the failure mode this condition is most prone to.
+func checkVersions(ctx context.Context, r client.Reader) (versionReport, error) {
+	// Metadata only. The Gateway API bundle is about 700KB of schema across a
+	// dozen CRDs, all of it irrelevant here, and this runs on every
+	// GatewayClass reconcile — the annotation is in the metadata, so ask for
+	// the metadata.
+	var list metav1.PartialObjectMetadataList
+	list.SetGroupVersionKind(apiextensionsv1.SchemeGroupVersion.WithKind("CustomResourceDefinitionList"))
+	if err := r.List(ctx, &list); err != nil {
+		return versionReport{}, fmt.Errorf("list customresourcedefinitions: %w", err)
+	}
+
+	var (
+		versions    []string
+		unannotated []string
+	)
+	for _, crd := range list.Items {
+		// The API server enforces that a CRD's name is <plural>.<group>, so
+		// the suffix is an exact test for the group and not a guess at one.
+		// Every Gateway API CRD counts, including kinds this controller never
+		// reads: upstream says "any Gateway API CRDs", and a v0.x TCPRoute
+		// left behind in a cluster is exactly the kind of thing worth naming
+		// in a message.
+		if !strings.HasSuffix(crd.Name, "."+gatewayv1.GroupName) {
+			continue
+		}
+		if v := crd.Annotations[annotationBundleVersion]; v != "" {
+			versions = append(versions, v)
+			continue
+		}
+		unannotated = append(unannotated, crd.Name)
+	}
+
+	return report(versions, unannotated), nil
+}
+
+// report turns what was found into the condition's status and message. Split
+// out from the read so the policy can be tested without a cluster.
+func report(versions, unannotated []string) versionReport {
+	slices.Sort(unannotated)
+	distinct := slices.Compact(slices.Sorted(slices.Values(versions)))
+
+	switch {
+	case len(distinct) == 0 && len(unannotated) == 0:
+		// Not reachable through New, which registers nothing unless the API
+		// server serves Gateway API kinds. Reachable if every CRD is deleted
+		// while we run, and "no CRDs" is not evidence of a supported version.
+		return versionReport{supported: false, detail: "are not installed"}
+
+	case len(unannotated) > 0:
+		detail := fmt.Sprintf("are missing the %s annotation on %s", annotationBundleVersion,
+			strings.Join(unannotated, ", "))
+		if len(distinct) > 0 {
+			detail = fmt.Sprintf("are at %s, and %s", strings.Join(distinct, ", "), detail)
+		}
+		return versionReport{supported: false, detail: detail}
+	}
+
+	detail := fmt.Sprintf("are at %s", strings.Join(distinct, ", "))
+	for _, v := range distinct {
+		// MajorMinor returns "" for anything it cannot parse, which never
+		// equals supportedVersions — so a version string that is not semver at
+		// all lands on unsupported without a separate branch to keep honest.
+		if semver.MajorMinor(v) != supportedVersions {
+			return versionReport{supported: false, detail: detail}
+		}
+	}
+	return versionReport{supported: true, detail: detail}
 }
 
 // parseCRDs reads the multi-document bundle. Anything that is not a CRD is

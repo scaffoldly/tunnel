@@ -88,7 +88,7 @@ func New(mgr ctrl.Manager, cfg config.Config) error {
 		return nil
 	}
 
-	if err := (&ClassReconciler{Client: mgr.GetClient()}).setup(mgr); err != nil {
+	if err := (&ClassReconciler{Client: mgr.GetClient(), CRDs: mgr.GetAPIReader()}).setup(mgr); err != nil {
 		return fmt.Errorf("setup gatewayclass controller: %w", err)
 	}
 
@@ -138,8 +138,25 @@ func installed(mgr ctrl.Manager) (bool, error) {
 // condition; a class nobody accepts leaves every Gateway referencing it in
 // limbo with no explanation, and a conformant consumer may refuse to use it.
 // Gateways naming one of our classes are provisioned, so this accepts.
+//
+// It requires SupportedVersion alongside it — "this condition MUST be set by a
+// controller when it marks a GatewayClass Accepted" — which is a claim about
+// the cluster rather than about us, so it is recomputed on every reconcile.
 type ClassReconciler struct {
 	client.Client
+	// CRDs reads the Gateway API CustomResourceDefinitions for the
+	// SupportedVersion condition. Separate from Client because it is the
+	// manager's uncached reader: an informer over CustomResourceDefinition
+	// caches every CRD in the cluster, schemas included, which on a cluster
+	// running cert-manager or Istio is more memory than the rest of this
+	// controller uses. The read is metadata-only and happens only when a
+	// GatewayClass changes, of which there are two.
+	//
+	// The cost of not caching is that a CRD upgrade under a running
+	// controller does not refresh the condition until the class is touched or
+	// the process restarts. Restarting after a Gateway API upgrade is the
+	// normal remedy anyway, since the compiled types are what moved.
+	CRDs client.Reader
 }
 
 func (r *ClassReconciler) setup(mgr ctrl.Manager) error {
@@ -166,6 +183,11 @@ func (r *ClassReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// this condition from one left over before the last edit to the class.
 	// The class's name is the provider, so the message can say where the
 	// tunnels it accepts will come from.
+	//
+	// Accepted does not depend on the CRD versions. See checkVersions: this is
+	// the "best effort" half of the choice upstream offers, and refusing a
+	// class whose Gateways provision is the failure this package already had
+	// once.
 	accepted := metav1.Condition{
 		Type:               string(gatewayv1.GatewayClassConditionStatusAccepted),
 		Status:             metav1.ConditionTrue,
@@ -174,14 +196,42 @@ func (r *ClassReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		ObservedGeneration: class.Generation,
 	}
 
-	if !upsert(&class.Status.Conditions, accepted) {
-		return ctrl.Result{}, nil
+	// A failed read is reported as unsupported rather than swallowed: we
+	// cannot vouch for versions we could not look at, and publishing True
+	// unverified is the same bug as the Accepted=False this package used to
+	// publish, pointed the other way. The error still comes back so the
+	// reconcile is retried and the condition corrects itself.
+	report, readErr := checkVersions(ctx, r.CRDs)
+	if readErr != nil {
+		report = versionReport{detail: fmt.Sprintf("could not be read (%v)", readErr)}
+	}
+
+	supported := metav1.Condition{
+		Type:               string(gatewayv1.GatewayClassConditionStatusSupportedVersion),
+		Status:             metav1.ConditionFalse,
+		Reason:             string(gatewayv1.GatewayClassReasonUnsupportedVersion),
+		Message:            fmt.Sprintf(consts.MsgClassUnsupportedVersionFmt, report.detail, supportedVersions),
+		ObservedGeneration: class.Generation,
+	}
+	if report.supported {
+		supported.Status = metav1.ConditionTrue
+		supported.Reason = string(gatewayv1.GatewayClassReasonSupportedVersion)
+		supported.Message = fmt.Sprintf(consts.MsgClassSupportedVersionFmt, report.detail, supportedVersions)
+	}
+
+	// Both, then one write: two status updates would be two watch events and
+	// a second reconcile to discover there was nothing left to do.
+	changed := upsert(&class.Status.Conditions, accepted)
+	changed = upsert(&class.Status.Conditions, supported) || changed
+	if !changed {
+		return ctrl.Result{}, readErr
 	}
 	if err := r.Status().Update(ctx, &class); err != nil {
 		return ctrl.Result{}, fmt.Errorf("update gatewayclass status: %w", err)
 	}
-	log.FromContext(ctx).Info("gatewayclass accepted", "gatewayclass", class.Name)
-	return ctrl.Result{}, nil
+	log.FromContext(ctx).Info("gatewayclass accepted", "gatewayclass", class.Name,
+		"supportedVersion", report.supported, "crds", report.detail)
+	return ctrl.Result{}, readErr
 }
 
 // Reconciler wires Gateways claimed by one of our GatewayClasses to a tunnel.
